@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
-import AnalyticsDialog from './AnalyticsDialog';
 import { useAuth } from '../context/AuthContext';
 
 const LeadsGrid = () => {
+    const navigate = useNavigate();
     const { user, logout } = useAuth();
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
     const [fields, setFields] = useState([]);
     const [activeMenu, setActiveMenu] = useState('leads');
     const [showUserMenu, setShowUserMenu] = useState(false);
@@ -43,13 +43,15 @@ const LeadsGrid = () => {
             const response = await api.get('/api/leads', { params });
 
             setLeads(response.data.data || []);
-            setTotalRecords(response.data.pagination?.totalRecords || 0);
-            setTotalPages(response.data.pagination?.totalPages || 1);
-            setCurrentPage(response.data.pagination?.currentPage || 1);
+            setTotalRecords(response.data.pagination?.total || 0);
+            setTotalPages(response.data.pagination?.pages || 1);
+            setCurrentPage(response.data.pagination?.page || 1);
 
-            if (response.data.fields && response.data.fields.length > 0) {
-                const excludeFields = ['__v', 'updatedAt'];
-                const displayFields = response.data.fields.filter(field => !excludeFields.includes(field));
+            // Extract field names from the first lead object
+            if ((response.data.data || []).length > 0) {
+                const firstLead = response.data.data[0];
+                const excludeFields = ['__v', 'updatedAt', '_id'];
+                const displayFields = Object.keys(firstLead).filter(field => !excludeFields.includes(field));
                 setFields(displayFields);
 
                 if (Object.keys(filters).length === 0) {
@@ -268,7 +270,7 @@ const LeadsGrid = () => {
                             </button>
 
                             <button
-                                onClick={() => setIsAnalyticsOpen(true)}
+                                onClick={() => navigate('/analytics')}
                                 className="group relative w-8 h-8 bg-transparent rounded-lg hover:bg-gray-100 transition-all duration-300 flex items-center justify-center hover:scale-110 border border-gray-300 hover:border-gray-400 focus:ring-1 focus:ring-gray-400"
                                 title="Analytics"
                             >
@@ -277,12 +279,6 @@ const LeadsGrid = () => {
                                 </svg>
                             </button>
                         </div>
-
-                        {/* Analytics Dialog */}
-                        <AnalyticsDialog
-                            isOpen={isAnalyticsOpen}
-                            onClose={() => setIsAnalyticsOpen(false)}
-                        />
 
                         {/* Table Section */}
                         <div className="bg-white rounded-lg shadow-2xl overflow-hidden border border-gray-200 animate-scale-in">

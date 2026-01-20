@@ -18,14 +18,8 @@ export const AuthProvider = ({ children }) => {
     const [authenticated, setAuthenticated] = useState(false);
     const [authChecked, setAuthChecked] = useState(false);
 
-    // Check authentication on mount - only once
-    useEffect(() => {
-        if (!authChecked) {
-            checkAuth();
-        }
-    }, [authChecked]);
-
-    const checkAuth = async () => {
+    // Memoize checkAuth to prevent infinite loops
+    const checkAuth = useCallback(async () => {
         // Don't check if already redirecting
         if (isRedirectingToLogin) {
             return;
@@ -52,7 +46,14 @@ export const AuthProvider = ({ children }) => {
             setLoading(false);
             setAuthChecked(true);
         }
-    };
+    }, []);
+
+    // Check authentication on mount - only once
+    useEffect(() => {
+        if (!authChecked) {
+            checkAuth();
+        }
+    }, [authChecked, checkAuth]);
 
     const logout = useCallback(async () => {
         if (isRedirectingToLogin) return;
@@ -75,18 +76,32 @@ export const AuthProvider = ({ children }) => {
         window.location.href = `${authServiceUrl}/login?redirect=${encodeURIComponent(currentServiceUrl)}`;
     }, []);
 
-    const redirectToLogin = useCallback(() => {
+    const redirectToLogin = useCallback(async () => {
         // Prevent multiple redirects
         if (isRedirectingToLogin) {
             return;
         }
         isRedirectingToLogin = true;
 
-        const currentUrl = window.location.href;
-        const authServiceUrl = getAuthServiceUrl();
-        const loginUrl = `${authServiceUrl}/login?redirect=${encodeURIComponent(currentUrl)}`;
+        try {
+            const currentUrl = window.location.href;
+            
+            // Call backend login API to get authUrl
+            const response = await api.post('/api/auth/login', {
+                redirect: currentUrl
+            });
 
-        window.location.href = loginUrl;
+            if (response.data.success && response.data.authUrl) {
+                // Redirect to the authUrl provided by backend
+                window.location.href = response.data.authUrl;
+            } else {
+                console.error('Login API did not return authUrl');
+                isRedirectingToLogin = false;
+            }
+        } catch (error) {
+            console.error('Error initiating login:', error);
+            isRedirectingToLogin = false;
+        }
     }, []);
 
     const value = {

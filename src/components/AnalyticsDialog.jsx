@@ -7,10 +7,168 @@ import {
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
+// Colors for charts - Grayscale palette
+const COLORS = [
+    '#1a1a1a', '#2d2d2d', '#3d3d3d', '#525252', '#666666',
+    '#7a7a7a', '#8f8f8f', '#a3a3a3', '#b8b8b8', '#cccccc',
+    '#000000', '#404040', '#595959', '#737373', '#8c8c8c'
+];
+
+// Render Pie Chart with Recharts
+const renderPieChart = (chartData, yAxisLabel) => (
+    <ResponsiveContainer width="100%" height={300}>
+        <PieChart>
+            <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                outerRadius={100}
+                fill="#8884d8"
+                dataKey="value"
+            >
+                {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+            </Pie>
+            <Tooltip
+                contentStyle={{
+                    backgroundColor: '#fff',
+                    border: '2px solid #e0e0e0',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+                }}
+                formatter={(value, name) => [value, yAxisLabel]}
+            />
+            <Legend />
+        </PieChart>
+    </ResponsiveContainer>
+);
+
+// Render Bar Chart with Recharts
+const renderBarChart = (chartData, yAxisLabel) => (
+    <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+                dataKey="name"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                angle={-45}
+                textAnchor="end"
+                height={60}
+            />
+            <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+            <Tooltip
+                contentStyle={{
+                    backgroundColor: '#fff',
+                    border: '2px solid #e0e0e0',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+                }}
+                formatter={(value) => [value, yAxisLabel]}
+            />
+            <Legend />
+            <Bar
+                dataKey="value"
+                name={yAxisLabel}
+                fill="#1a1a1a"
+                radius={[8, 8, 0, 0]}
+            >
+                {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+            </Bar>
+        </BarChart>
+    </ResponsiveContainer>
+);
+
+// Render Line Chart with Recharts
+const renderLineChart = (chartData, yAxisLabel) => (
+    <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+                dataKey="name"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                angle={-45}
+                textAnchor="end"
+                height={60}
+            />
+            <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+            <Tooltip
+                contentStyle={{
+                    backgroundColor: '#fff',
+                    border: '2px solid #e0e0e0',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+                }}
+                formatter={(value) => [value, yAxisLabel]}
+            />
+            <Legend />
+            <Line
+                type="monotone"
+                dataKey="value"
+                name={yAxisLabel}
+                stroke="#1a1a1a"
+                strokeWidth={3}
+                dot={{ fill: '#1a1a1a', strokeWidth: 2, r: 5 }}
+                activeDot={{ r: 7, fill: '#3d3d3d' }}
+            />
+        </LineChart>
+    </ResponsiveContainer>
+);
+
+// Chart Renderer Component
+const ChartRenderer = ({ chartConfig, fetchChartData }) => {
+    const [chartData, setChartData] = useState([]);
+    const [chartLoading, setChartLoading] = useState(false);
+
+    useEffect(() => {
+        const loadChartData = async () => {
+            if (chartConfig.xAxis && chartConfig.yAxis && chartConfig.aggregation) {
+                setChartLoading(true);
+                const data = await fetchChartData(chartConfig);
+                setChartData(data);
+                setChartLoading(false);
+            }
+        };
+
+        loadChartData();
+    }, [chartConfig.xAxis, chartConfig.yAxis, chartConfig.aggregation, chartConfig.dateFilterFrom, chartConfig.dateFilterTo]);
+
+    const yAxisLabel = chartConfig.yAxis?.label || 'Value';
+
+    if (chartLoading) return (
+        <div className="text-center py-12">
+            <div className="spinner mx-auto"></div>
+            <p className="text-gray-600 mt-4 text-sm font-medium">Loading data...</p>
+        </div>
+    );
+
+    if (!chartConfig.chartType) return <div className="text-center py-12 text-gray-500 text-sm">Select chart type to begin</div>;
+    if (!chartConfig.xAxis) return <div className="text-center py-12 text-gray-500 text-sm">Select X axis</div>;
+    if (!chartConfig.yAxis) return <div className="text-center py-12 text-gray-500 text-sm">Select Y axis</div>;
+    if (!chartConfig.aggregation) return <div className="text-center py-12 text-gray-500 text-sm">Select aggregation type</div>;
+    if (!chartData.length) return <div className="text-center py-12 text-gray-500 text-sm">No data available</div>;
+
+    switch (chartConfig.chartType.value) {
+        case 'pie':
+            return renderPieChart(chartData, yAxisLabel);
+        case 'bar':
+            return renderBarChart(chartData, yAxisLabel);
+        case 'line':
+            return renderLineChart(chartData, yAxisLabel);
+        default:
+            return null;
+    }
+};
+
 const AnalyticsDialog = ({ isOpen, onClose }) => {
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [fields, setFields] = useState([]);
+    const [chartDataCache, setChartDataCache] = useState({});
 
     // Chart types
     const chartTypes = [
@@ -45,7 +203,8 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
         xAxis: null,
         yAxis: null,
         aggregation: null,
-        dateFilter: ''
+        dateFilterFrom: '',
+        dateFilterTo: ''
     };
 
     // State for charts
@@ -100,7 +259,57 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
         }
     };
 
-    // Process data based on X and Y axis selection for a specific chart
+    // Fetch chart data from API
+    const fetchChartData = async (chartConfig) => {
+        if (!chartConfig.xAxis || !chartConfig.yAxis || !chartConfig.aggregation) {
+            return [];
+        }
+
+        // Create cache key
+        const cacheKey = JSON.stringify({
+            xAxis: chartConfig.xAxis.value,
+            yAxis: chartConfig.yAxis.value,
+            aggregation: chartConfig.aggregation.value,
+            dateFilterFrom: chartConfig.dateFilterFrom || '',
+            dateFilterTo: chartConfig.dateFilterTo || ''
+        });
+
+        // Return cached data if available
+        if (chartDataCache[cacheKey]) {
+            return chartDataCache[cacheKey];
+        }
+
+        try {
+            const params = {
+                xAxis: chartConfig.xAxis.value,
+                yAxis: chartConfig.yAxis.value,
+                aggregation: chartConfig.aggregation.value,
+            };
+
+            if (chartConfig.dateFilterFrom) {
+                params.dateFrom = chartConfig.dateFilterFrom;
+            }
+            if (chartConfig.dateFilterTo) {
+                params.dateTo = chartConfig.dateFilterTo;
+            }
+
+            const response = await api.get('/api/analytics/chart-data', { params });
+            const data = response.data.data || [];
+
+            // Cache the result
+            setChartDataCache(prev => ({
+                ...prev,
+                [cacheKey]: data
+            }));
+
+            return data;
+        } catch (err) {
+            console.error('Error fetching chart data:', err);
+            return [];
+        }
+    };
+
+    // Process data based on X and Y axis selection for a specific chart (fallback for client-side processing)
     const getChartData = (chartConfig) => {
         if (!leads.length || !chartConfig.xAxis || !chartConfig.yAxis || !chartConfig.aggregation) return [];
 
@@ -154,145 +363,8 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
         }).sort((a, b) => b.value - a.value);
     };
 
-    // Colors for charts - Grayscale palette
-    const COLORS = [
-        '#1a1a1a', '#2d2d2d', '#3d3d3d', '#525252', '#666666',
-        '#7a7a7a', '#8f8f8f', '#a3a3a3', '#b8b8b8', '#cccccc',
-        '#000000', '#404040', '#595959', '#737373', '#8c8c8c'
-    ];
-
-    // Render Pie Chart with Recharts
-    const renderPieChart = (chartData, yAxisLabel) => (
-        <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-                <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    dataKey="value"
-                >
-                    {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                </Pie>
-                <Tooltip
-                    contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '2px solid #e0e0e0',
-                        borderRadius: '12px',
-                        boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-                    }}
-                    formatter={(value, name) => [value, yAxisLabel]}
-                />
-                <Legend />
-            </PieChart>
-        </ResponsiveContainer>
-    );
-
-    // Render Bar Chart with Recharts
-    const renderBarChart = (chartData, yAxisLabel) => (
-        <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                    dataKey="name"
-                    tick={{ fill: '#64748b', fontSize: 11 }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={60}
-                />
-                <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
-                <Tooltip
-                    contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '2px solid #e0e0e0',
-                        borderRadius: '12px',
-                        boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-                    }}
-                    formatter={(value) => [value, yAxisLabel]}
-                />
-                <Legend />
-                <Bar
-                    dataKey="value"
-                    name={yAxisLabel}
-                    fill="#1a1a1a"
-                    radius={[8, 8, 0, 0]}
-                >
-                    {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                </Bar>
-            </BarChart>
-        </ResponsiveContainer>
-    );
-
-    // Render Line Chart with Recharts
-    const renderLineChart = (chartData, yAxisLabel) => (
-        <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                    dataKey="name"
-                    tick={{ fill: '#64748b', fontSize: 11 }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={60}
-                />
-                <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
-                <Tooltip
-                    contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '2px solid #e0e0e0',
-                        borderRadius: '12px',
-                        boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-                    }}
-                    formatter={(value) => [value, yAxisLabel]}
-                />
-                <Legend />
-                <Line
-                    type="monotone"
-                    dataKey="value"
-                    name={yAxisLabel}
-                    stroke="#1a1a1a"
-                    strokeWidth={3}
-                    dot={{ fill: '#1a1a1a', strokeWidth: 2, r: 5 }}
-                    activeDot={{ r: 7, fill: '#3d3d3d' }}
-                />
-            </LineChart>
-        </ResponsiveContainer>
-    );
-
     const renderChart = (chartConfig) => {
-        const chartData = getChartData(chartConfig);
-        const yAxisLabel = chartConfig.yAxis?.label || 'Value';
-
-        if (loading) return (
-            <div className="text-center py-12">
-                <div className="spinner mx-auto"></div>
-                <p className="text-gray-600 mt-4 text-sm font-medium">Loading data...</p>
-            </div>
-        );
-
-        if (!chartConfig.chartType) return <div className="text-center py-12 text-gray-500 text-sm">Select chart type to begin</div>;
-        if (!chartConfig.xAxis) return <div className="text-center py-12 text-gray-500 text-sm">Select X axis</div>;
-        if (!chartConfig.yAxis) return <div className="text-center py-12 text-gray-500 text-sm">Select Y axis</div>;
-        if (!chartConfig.aggregation) return <div className="text-center py-12 text-gray-500 text-sm">Select aggregation type</div>;
-        if (!chartData.length) return <div className="text-center py-12 text-gray-500 text-sm">No data available</div>;
-
-        switch (chartConfig.chartType.value) {
-            case 'pie':
-                return renderPieChart(chartData, yAxisLabel);
-            case 'bar':
-                return renderBarChart(chartData, yAxisLabel);
-            case 'line':
-                return renderLineChart(chartData, yAxisLabel);
-            default:
-                return null;
-        }
+        return <ChartRenderer chartConfig={chartConfig} fetchChartData={fetchChartData} />;
     };
 
     // Render single chart card
@@ -310,17 +382,32 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
                     )}
                 </h4>
                 <div className="flex items-center gap-2">
-                    <input
-                        type="date"
-                        value={chartConfig.dateFilter}
-                        onChange={(e) => updateChartConfig(chartConfig.id, 'dateFilter', e.target.value)}
-                        className="px-3 py-1.5 text-xs border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent transition-all"
-                    />
-                    {chartConfig.dateFilter && (
+                    <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-600">From:</label>
+                        <input
+                            type="date"
+                            value={chartConfig.dateFilterFrom}
+                            onChange={(e) => updateChartConfig(chartConfig.id, 'dateFilterFrom', e.target.value)}
+                            className="px-2 py-1 text-xs border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent transition-all"
+                        />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-600">To:</label>
+                        <input
+                            type="date"
+                            value={chartConfig.dateFilterTo}
+                            onChange={(e) => updateChartConfig(chartConfig.id, 'dateFilterTo', e.target.value)}
+                            className="px-2 py-1 text-xs border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent transition-all"
+                        />
+                    </div>
+                    {(chartConfig.dateFilterFrom || chartConfig.dateFilterTo) && (
                         <button
-                            onClick={() => updateChartConfig(chartConfig.id, 'dateFilter', '')}
+                            onClick={() => {
+                                updateChartConfig(chartConfig.id, 'dateFilterFrom', '');
+                                updateChartConfig(chartConfig.id, 'dateFilterTo', '');
+                            }}
                             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
-                            title="Clear date filter"
+                            title="Clear date filters"
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

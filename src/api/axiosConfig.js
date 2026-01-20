@@ -5,8 +5,8 @@ const API_HOST = import.meta.env.VITE_API_HOST || 'http://localhost';
 const API_PORT = import.meta.env.VITE_API_PORT || '8083';
 const BASE_URL = API_PORT ? `${API_HOST}:${API_PORT}` : API_HOST;
 
-// Auth service URL (where users login)
-const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_SERVICE_URL || 'http://localhost:3001';
+// Auth service URL (go through backend, not directly to external auth)
+const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_SERVICE_URL || 'http://localhost:8083';
 
 // Create axios instance
 const api = axios.create({

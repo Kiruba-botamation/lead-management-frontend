@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './ProtectedRoute';
 import LeadsGrid from './components/LeadsGrid';
 import UnauthorizedPage from './pages/UnauthorizedPage';
+import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
 
 function App() {
     return (
@@ -18,6 +19,16 @@ function App() {
                                 <div className="min-h-screen bg-gray-100">
                                     <LeadsGrid />
                                 </div>
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    {/* Analytics Dashboard route */}
+                    <Route
+                        path="/analytics"
+                        element={
+                            <ProtectedRoute>
+                                <AnalyticsDashboardPage />
                             </ProtectedRoute>
                         }
                     />
