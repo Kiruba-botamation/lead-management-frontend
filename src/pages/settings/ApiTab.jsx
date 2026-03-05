@@ -120,11 +120,10 @@ const ApiTab = ({ acctId: acctIdProp }) => {
                     onClick={handleCopy}
                     disabled={loading}
                     title="Copy token"
-                    className={`p-2 rounded-lg border transition-colors disabled:opacity-40 ${
-                        copySuccess
+                    className={`p-2 rounded-lg border transition-colors disabled:opacity-40 ${copySuccess
                             ? 'border-green-400 bg-green-50'
                             : 'border-gray-300 bg-white hover:bg-gray-50'
-                    }`}
+                        }`}
                 >
                     {copySuccess ? (
                         <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

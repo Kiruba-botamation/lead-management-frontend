@@ -6,7 +6,7 @@ import { useAccount } from '../context/AccountContext';
 
 const LeadsGrid = () => {
     const navigate = useNavigate();
-    const { user, logout } = useAuth();
+    const { user, userDetails, logout } = useAuth();
     const {
         acctNo,
         acctName,
@@ -295,40 +295,55 @@ const LeadsGrid = () => {
 
                             {/* User Profile */}
                             <div className="relative" ref={userMenuRef}>
-                            <button
-                                onClick={() => { setShowUserMenu(v => !v); setShowAccountMenu(false); }}
-                                className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
-                            >
-                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white text-xs font-bold shadow-lg border border-gray-600">
-                                    {user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'U'}
-                                </div>
-                                <span className="text-xs font-medium text-white hidden md:block">{user?.name || user?.email || 'User'}</span>
-                                <svg className={`w-3 h-3 text-gray-400 transition-transform duration-300 ${showUserMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </button>
+                                <button
+                                    onClick={() => { setShowUserMenu(v => !v); setShowAccountMenu(false); }}
+                                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
+                                >
+                                    {(() => {
+                                        const imgUrl = userDetails?.profileImageUrl || '';
+                                        const src = imgUrl.startsWith('/') ? `http://localhost:8080${imgUrl}` : imgUrl;
+                                        return src
+                                            ? <img src={src} alt="avatar" className="w-6 h-6 rounded-full object-cover border border-gray-600 flex-shrink-0" />
+                                            : <div className="w-6 h-6 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white text-xs font-bold shadow-lg border border-gray-600">
+                                                {user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'U'}
+                                              </div>;
+                                    })()}
+                                    <span className="text-xs font-medium text-white hidden md:block">{user?.name || user?.email || 'User'}</span>
+                                    <svg className={`w-3 h-3 text-gray-400 transition-transform duration-300 ${showUserMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
 
-                            {/* Dropdown Menu */}
-                            {showUserMenu && (
-                                <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-2xl border border-gray-200 py-1 z-50 animate-scale-in">
-                                    <div className="px-3 py-2 border-b border-gray-100">
-                                        <p className="text-xs font-semibold text-gray-900">{user?.name || 'User'}</p>
-                                        <p className="text-[10px] text-gray-500 truncate mt-0.5">{user?.email || ''}</p>
+                                {/* Dropdown Menu */}
+                                {showUserMenu && (
+                                    <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-2xl border border-gray-200 py-1 z-50 animate-scale-in">
+                                        <div className="px-3 py-2 border-b border-gray-100">
+                                            <p className="text-xs font-semibold text-gray-900">{user?.name || 'User'}</p>
+                                            <p className="text-[10px] text-gray-500 truncate mt-0.5">{user?.email || ''}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => { setShowUserMenu(false); navigate('/profile'); }}
+                                            className="w-full px-3 py-2 text-left text-xs font-medium text-gray-900 hover:bg-gray-100 transition-colors flex items-center gap-1.5"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                            My Profile
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowUserMenu(false);
+                                                logout();
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-xs font-medium text-gray-900 hover:bg-gray-100 transition-colors flex items-center gap-1.5"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                            </svg>
+                                            Logout
+                                        </button>
                                     </div>
-                                    <button
-                                        onClick={() => {
-                                            setShowUserMenu(false);
-                                            logout();
-                                        }}
-                                        className="w-full px-3 py-2 text-left text-xs font-medium text-gray-900 hover:bg-gray-100 transition-colors flex items-center gap-1.5"
-                                    >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                                        </svg>
-                                        Logout
-                                    </button>
-                                </div>
-                            )}
+                                )}
                             </div>
                             {/* end User Profile */}
 

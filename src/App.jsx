@@ -7,6 +7,7 @@ import LeadsGrid from './components/LeadsGrid';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
 import SettingsPage from './pages/SettingsPage';
+import ProfilePage from './pages/ProfilePage';
 import LinkAccountDialog from './components/LinkAccountDialog';
 
 // Thin wrapper that reads AccountContext and renders the global link-account dialog
@@ -36,6 +37,16 @@ function AppRoutes() {
                             <div className="min-h-screen bg-gray-100">
                                 <LeadsGrid />
                             </div>
+                        </ProtectedRoute>
+                    }
+                />
+
+                {/* Profile route */}
+                <Route
+                    path="/profile"
+                    element={
+                        <ProtectedRoute>
+                            <ProfilePage />
                         </ProtectedRoute>
                     }
                 />
