@@ -1,131 +1,131 @@
-import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
-import api, { AUTH_SERVICE_URL } from '../api/axiosConfig';
+import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
+import api, { AUTH_SERVICE_URL, authApi } from '../api/axiosConfig';
 import {
     normalizeUserData,
     logAuthEvent,
     getCurrentServiceUrl,
-    getAuthServiceUrl
+    redirectToSSOLogin,
 } from '../utils/authHelpers';
 
 const AuthContext = createContext(null);
 
-// Track if we're already redirecting (module level to survive re-renders)
-let isRedirectingToLogin = false;
-
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [authenticated, setAuthenticated] = useState(false);
-    const [authChecked, setAuthChecked] = useState(false);
+    const [user, setUser]               = useState(null);      // Raw user from SSO token
+    const [userDetails, setUserDetails] = useState(null);      // Full user profile from auth DB
+    const [loading, setLoading]         = useState(true);      // Auth check in progress
+    const [authenticated, setAuthenticated] = useState(false); // Is session valid?
 
-    // Memoize checkAuth to prevent infinite loops
-    const checkAuth = useCallback(async () => {
-        // Don't check if already redirecting
-        if (isRedirectingToLogin) {
-            return;
-        }
+    // Prevents duplicate checks in React StrictMode
+    const authCheckedRef  = useRef(false);
+    const authCheckingRef = useRef(false);
 
+    useEffect(() => {
+        if (authCheckedRef.current || authCheckingRef.current) return;
+        authCheckedRef.current  = true;
+        authCheckingRef.current = true;
+        checkAuth();
+    }, []);
+
+    const checkAuth = async () => {
         try {
             setLoading(true);
 
-            // Call backend's SSO auth verification endpoint
+            // ── Core SSO auth check ──────────────────────────────────────────
+            // Backend reads the HTTP-only JWT cookie and returns the user.
+            // If cookie is missing or expired, it returns 401 (interceptor redirects).
             const response = await api.get('/api/ui/sso/auth');
 
             if (response.data.success || response.data.user) {
-                const userData = normalizeUserData(response.data.user || response.data.data || {});
+                const rawUser = response.data.user || response.data.data || {};
+                const userData = normalizeUserData(rawUser);
+
                 setAuthenticated(true);
-                setUser(response.data.user || response.data.data);
+                setUser(rawUser);
+                logAuthEvent('Auth check passed', { userId: userData.userId });
+
+                // ── Optional: Fetch full user profile from auth backend ──────
+                if (userData.userId) {
+                    try {
+                        const profileRes = await authApi.get(`/api/user/users/${userData.userId}`);
+                        if (profileRes.data?.success && profileRes.data?.user) {
+                            const profile = profileRes.data.user;
+                            setUserDetails({
+                                name:            profile.name || '',
+                                phone:           profile.phone || '',
+                                email:           profile.email || '',
+                                timezone:        profile.timezone || '',
+                                role:            profile.role,
+                                roleLabel:       profile.roleLabel,
+                                profileImageUrl: profile.profileImageUrl || '',
+                            });
+                        }
+                    } catch (profileError) {
+                        console.warn('[SSO] Could not fetch user profile:', profileError.message);
+                    }
+                }
             } else {
                 setAuthenticated(false);
                 setUser(null);
             }
         } catch (error) {
-            setAuthenticated(false);
-            setUser(null);
+            // 401 is handled by the axios interceptor (auto-redirect to SSO login)
+            // Any other error: mark as unauthenticated
+            if (error.response?.status !== 401) {
+                setAuthenticated(false);
+                setUser(null);
+            }
         } finally {
             setLoading(false);
-            setAuthChecked(true);
+            authCheckingRef.current = false;
         }
-    }, []);
+    };
 
-    // Check authentication on mount - only once
-    useEffect(() => {
-        if (!authChecked) {
-            checkAuth();
-        }
-    }, [authChecked, checkAuth]);
-
-    const logout = useCallback(async () => {
-        if (isRedirectingToLogin) return;
-        isRedirectingToLogin = true;
-
-        try {
-            await api.post(`${AUTH_SERVICE_URL}/api/auth/logout`);
-        } catch (error) {
-            // Ignore logout errors
-        }
-
-        // Clear local state
+    const logout = async () => {
+        // 1. Clear local state immediately
         setAuthenticated(false);
         setUser(null);
-        localStorage.clear();
+        setUserDetails(null);
 
-        // Redirect to auth service login page
-        const currentServiceUrl = getCurrentServiceUrl();
-        const authServiceUrl = getAuthServiceUrl();
-        window.location.href = `${authServiceUrl}/login?redirect=${encodeURIComponent(currentServiceUrl)}`;
-    }, []);
-
-    const redirectToLogin = useCallback(async () => {
-        // Prevent multiple redirects
-        if (isRedirectingToLogin) {
-            return;
-        }
-        isRedirectingToLogin = true;
-
+        // 2. Tell the backend to clear the server-side cookie
         try {
-            const currentUrl = window.location.href;
-            
-            // Call backend login API to get authUrl
-            const response = await api.post('/api/auth/login', {
-                redirect: currentUrl
-            });
-
-            if (response.data.success && response.data.authUrl) {
-                // Redirect to the authUrl provided by backend
-                window.location.href = response.data.authUrl;
-            } else {
-                console.error('Login API did not return authUrl');
-                isRedirectingToLogin = false;
-            }
-        } catch (error) {
-            console.error('Error initiating login:', error);
-            isRedirectingToLogin = false;
+            await api.post('/api/ui/sso/logout');
+        } catch (e) {
+            console.warn('[SSO] Server logout failed, continuing with client cleanup');
         }
-    }, []);
 
-    const value = {
-        user,
-        authenticated,
-        loading,
-        authChecked,
-        logout,
-        checkAuth,
-        redirectToLogin
+        // 3. Clear all local storage
+        localStorage.clear();
+        sessionStorage.clear();
+
+        // 4. Redirect to SSO login page
+        const redirectParam = encodeURIComponent(getCurrentServiceUrl());
+        window.location.href = `${AUTH_SERVICE_URL}/login?redirect=${redirectParam}`;
+    };
+
+    const redirectToLogin = () => {
+        redirectToSSOLogin(getCurrentServiceUrl());
     };
 
     return (
-        <AuthContext.Provider value={value}>
+        <AuthContext.Provider value={{
+            user,
+            userDetails,
+            authenticated,
+            loading,
+            logout,
+            checkAuth,
+            redirectToLogin,
+        }}>
             {children}
         </AuthContext.Provider>
     );
 };
 
-// Custom hook
+// Custom hook — use this in any component to access auth state
 export const useAuth = () => {
     const context = useContext(AuthContext);
     if (!context) {
-        throw new Error('useAuth must be used within AuthProvider');
+        throw new Error('useAuth must be used within <AuthProvider>');
     }
     return context;
 };
