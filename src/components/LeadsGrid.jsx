@@ -2,16 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAuth } from '../context/AuthContext';
+import { useAccount } from '../context/AccountContext';
 
 const LeadsGrid = () => {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const {
+        acctNo,
+        acctName,
+        accounts,
+        isAccountLinked,
+        accountsLoaded,
+        accountsLoading,
+        setIsLinkDialogOpen,
+        switchAccount,
+    } = useAccount();
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [fields, setFields] = useState([]);
     const [activeMenu, setActiveMenu] = useState('leads');
     const [showUserMenu, setShowUserMenu] = useState(false);
+    const [showAccountMenu, setShowAccountMenu] = useState(false);
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -29,6 +41,9 @@ const LeadsGrid = () => {
 
     // Fetch leads from API
     const fetchLeads = async () => {
+        // Wait until account state is resolved before fetching
+        if (!isAccountLinked || !acctNo) return;
+
         setLoading(true);
         setError(null);
 
@@ -37,6 +52,7 @@ const LeadsGrid = () => {
                 page: currentPage,
                 limit: pageSize,
                 ...(sortField && { sortBy: sortField, sortOrder }),
+                ...(acctNo && { acctNo }),
                 ...appliedFilters
             };
 
@@ -72,7 +88,7 @@ const LeadsGrid = () => {
 
     useEffect(() => {
         fetchLeads();
-    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters]);
+    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctNo, isAccountLinked]);
 
     // Handle sorting
     const handleSort = (field) => {
@@ -204,10 +220,87 @@ const LeadsGrid = () => {
                             </button>
                         </div>
 
+                        {/* Account dropdown */}
+                        {accountsLoaded && (
+                            <div className="flex items-center gap-1 ml-2">
+                                {isAccountLinked && acctNo ? (
+                                    <div className="relative">
+                                        {/* Trigger button */}
+                                        <button
+                                            onClick={() => { setShowAccountMenu(v => !v); setShowUserMenu(false); }}
+                                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors"
+                                        >
+                                            <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0"></div>
+                                            <span className="text-[10px] font-semibold text-white max-w-[120px] truncate">
+                                                {acctName || acctNo}
+                                            </span>
+                                            <svg
+                                                className={`w-2.5 h-2.5 text-gray-400 transition-transform duration-200 ${showAccountMenu ? 'rotate-180' : ''}`}
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </button>
+
+                                        {/* Dropdown panel */}
+                                        {showAccountMenu && (
+                                            <div className="absolute left-0 mt-1 min-w-[220px] bg-white rounded-lg shadow-2xl border border-gray-200 py-1 z-50">
+                                                <p className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Linked Accounts</p>
+                                                {accounts.map((acc) => (
+                                                    <button
+                                                        key={acc.acctNo}
+                                                        onClick={() => { switchAccount(acc); setShowAccountMenu(false); }}
+                                                        className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center gap-2 ${
+                                                            acc.acctNo === acctNo
+                                                                ? 'bg-gray-50 font-semibold text-gray-900'
+                                                                : 'text-gray-700 hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${acc.acctNo === acctNo ? 'bg-green-400' : 'bg-gray-300'}`}></div>
+                                                        <div className="flex flex-col min-w-0">
+                                                            <span className="truncate">{acc.accountName || acc.acctNo}</span>
+                                                            {acc.accountName && <span className="text-[10px] text-gray-400 truncate">{acc.acctNo}</span>}
+                                                        </div>
+                                                        {acc.acctNo === acctNo && (
+                                                            <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                                <div className="border-t border-gray-100 mt-1 pt-1">
+                                                    <button
+                                                        onClick={() => { setIsLinkDialogOpen(true); setShowAccountMenu(false); }}
+                                                        className="w-full px-3 py-2 text-left text-xs text-gray-500 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                                                    >
+                                                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                        </svg>
+                                                        Link another account
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    // No account linked
+                                    <button
+                                        onClick={() => setIsLinkDialogOpen(true)}
+                                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yellow-500 hover:bg-yellow-400 transition-colors text-black"
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                        </svg>
+                                        <span className="text-[10px] font-bold">Link Account</span>
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         {/* User Profile */}
                         <div className="ml-auto py-2 relative">
                             <button
-                                onClick={() => setShowUserMenu(!showUserMenu)}
+                                onClick={() => { setShowUserMenu(v => !v); setShowAccountMenu(false); }}
                                 className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
                             >
                                 <div className="w-6 h-6 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white text-xs font-bold shadow-lg border border-gray-600">
@@ -247,7 +340,30 @@ const LeadsGrid = () => {
 
             {/* Content Area */}
             <div className="container mx-auto px-4 py-4">
-                {activeMenu === 'leads' ? (
+                {/* No Account Linked — full-page prompt */}
+                {accountsLoaded && !accountsLoading && !isAccountLinked && (
+                    <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
+                        <div className="bg-white border border-gray-200 rounded-xl shadow-xl px-8 py-10 text-center max-w-sm">
+                            <div className="w-14 h-14 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-7 h-7 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                </svg>
+                            </div>
+                            <h2 className="text-lg font-bold text-gray-900 mb-2">No Account Linked</h2>
+                            <p className="text-xs text-gray-500 mb-5">
+                                You need to link a business account to view and manage leads.
+                            </p>
+                            <button
+                                onClick={() => setIsLinkDialogOpen(true)}
+                                className="px-5 py-2.5 bg-black text-white text-xs font-semibold rounded-lg hover:bg-gray-800 transition-colors"
+                            >
+                                Link Account
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {isAccountLinked && (activeMenu === 'leads' ? (
                     <div className="animate-fade-in">
                         {/* Action Buttons */}
                         <div className="mb-3 flex justify-start gap-2">
@@ -469,7 +585,7 @@ const LeadsGrid = () => {
                             <p className="text-gray-600 text-sm">Settings page coming soon...</p>
                         </div>
                     </div>
-                )}
+                ))}
             </div>
         </div>
     );

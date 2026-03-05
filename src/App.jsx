@@ -1,16 +1,32 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { AccountProvider, useAccount } from './context/AccountContext';
 import ProtectedRoute from './ProtectedRoute';
 import LeadsGrid from './components/LeadsGrid';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
+import LinkAccountDialog from './components/LinkAccountDialog';
 
-function App() {
+// Thin wrapper that reads AccountContext and renders the global link-account dialog
+function AccountDialogWrapper() {
+    const { isLinkDialogOpen, setIsLinkDialogOpen, handleAccountLinked } = useAccount();
     return (
-        <AuthProvider>
-            <BrowserRouter>
-                <Routes>
+        <LinkAccountDialog
+            isOpen={isLinkDialogOpen}
+            onClose={() => setIsLinkDialogOpen(false)}
+            onSave={handleAccountLinked}
+        />
+    );
+}
+
+// AppRoutes is a separate component so AccountProvider can use router hooks (useNavigate, useLocation)
+function AppRoutes() {
+    return (
+        <AccountProvider>
+            {/* Global Link Account dialog — renders over any page */}
+            <AccountDialogWrapper />
+            <Routes>
                     {/* Protected routes */}
                     <Route
                         path="/leads"
@@ -51,6 +67,15 @@ function App() {
                         element={<Navigate to="/leads" replace />}
                     />
                 </Routes>
+        </AccountProvider>
+    );
+}
+
+function App() {
+    return (
+        <AuthProvider>
+            <BrowserRouter>
+                <AppRoutes />
             </BrowserRouter>
         </AuthProvider>
     );

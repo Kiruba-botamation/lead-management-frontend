@@ -10,18 +10,18 @@ import {
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-    const [user, setUser]               = useState(null);      // Raw user from SSO token
+    const [user, setUser] = useState(null);      // Raw user from SSO token
     const [userDetails, setUserDetails] = useState(null);      // Full user profile from auth DB
-    const [loading, setLoading]         = useState(true);      // Auth check in progress
+    const [loading, setLoading] = useState(true);      // Auth check in progress
     const [authenticated, setAuthenticated] = useState(false); // Is session valid?
 
     // Prevents duplicate checks in React StrictMode
-    const authCheckedRef  = useRef(false);
+    const authCheckedRef = useRef(false);
     const authCheckingRef = useRef(false);
 
     useEffect(() => {
         if (authCheckedRef.current || authCheckingRef.current) return;
-        authCheckedRef.current  = true;
+        authCheckedRef.current = true;
         authCheckingRef.current = true;
         checkAuth();
     }, []);
@@ -50,12 +50,12 @@ export const AuthProvider = ({ children }) => {
                         if (profileRes.data?.success && profileRes.data?.user) {
                             const profile = profileRes.data.user;
                             setUserDetails({
-                                name:            profile.name || '',
-                                phone:           profile.phone || '',
-                                email:           profile.email || '',
-                                timezone:        profile.timezone || '',
-                                role:            profile.role,
-                                roleLabel:       profile.roleLabel,
+                                name: profile.name || '',
+                                phone: profile.phone || '',
+                                email: profile.email || '',
+                                timezone: profile.timezone || '',
+                                role: profile.role,
+                                roleLabel: profile.roleLabel,
                                 profileImageUrl: profile.profileImageUrl || '',
                             });
                         }
