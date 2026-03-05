@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAuth } from '../context/AuthContext';
@@ -21,9 +21,25 @@ const LeadsGrid = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [fields, setFields] = useState([]);
-    const [activeMenu, setActiveMenu] = useState('leads');
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [showAccountMenu, setShowAccountMenu] = useState(false);
+
+    const accountMenuRef = useRef(null);
+    const userMenuRef = useRef(null);
+
+    // Close dropdowns when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (accountMenuRef.current && !accountMenuRef.current.contains(e.target)) {
+                setShowAccountMenu(false);
+            }
+            if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+                setShowUserMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -184,11 +200,7 @@ const LeadsGrid = () => {
                         {/* Menu Items */}
                         <div className="flex items-center gap-1">
                             <button
-                                onClick={() => setActiveMenu('leads')}
-                                className={`px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative ${activeMenu === 'leads'
-                                    ? 'bg-gray-900 text-white shadow-lg'
-                                    : 'text-gray-400 hover:bg-gray-900 hover:text-white'
-                                    }`}
+                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative bg-gray-900 text-white shadow-lg"
                             >
                                 <div className="flex items-center gap-1.5">
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -196,16 +208,11 @@ const LeadsGrid = () => {
                                     </svg>
                                     Leads
                                 </div>
-                                {activeMenu === 'leads' && (
-                                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-t-full"></div>
-                                )}
+                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-t-full"></div>
                             </button>
                             <button
-                                onClick={() => setActiveMenu('settings')}
-                                className={`px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative ${activeMenu === 'settings'
-                                    ? 'bg-gray-900 text-white shadow-lg'
-                                    : 'text-gray-400 hover:bg-gray-900 hover:text-white'
-                                    }`}
+                                onClick={() => navigate('/settings')}
+                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative text-gray-400 hover:bg-gray-900 hover:text-white"
                             >
                                 <div className="flex items-center gap-1.5">
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -214,91 +221,80 @@ const LeadsGrid = () => {
                                     </svg>
                                     Settings
                                 </div>
-                                {activeMenu === 'settings' && (
-                                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-t-full"></div>
-                                )}
                             </button>
                         </div>
 
-                        {/* Account dropdown */}
-                        {accountsLoaded && (
-                            <div className="flex items-center gap-1 ml-2">
-                                {isAccountLinked && acctNo ? (
-                                    <div className="relative">
-                                        {/* Trigger button */}
-                                        <button
-                                            onClick={() => { setShowAccountMenu(v => !v); setShowUserMenu(false); }}
-                                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors"
-                                        >
-                                            <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0"></div>
-                                            <span className="text-[10px] font-semibold text-white max-w-[120px] truncate">
-                                                {acctName || acctNo}
-                                            </span>
-                                            <svg
-                                                className={`w-2.5 h-2.5 text-gray-400 transition-transform duration-200 ${showAccountMenu ? 'rotate-180' : ''}`}
-                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        {/* Right side: Account + User */}
+                        <div className="ml-auto py-2 flex items-center gap-2">
+
+                            {/* Account dropdown */}
+                            {accountsLoaded && (
+                                <div className="relative" ref={accountMenuRef}>
+                                    {isAccountLinked && acctNo ? (
+                                        <>
+                                            <button
+                                                onClick={() => { setShowAccountMenu(v => !v); setShowUserMenu(false); }}
+                                                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
                                             >
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                        </button>
-
-                                        {/* Dropdown panel */}
-                                        {showAccountMenu && (
-                                            <div className="absolute left-0 mt-1 min-w-[220px] bg-white rounded-lg shadow-2xl border border-gray-200 py-1 z-50">
-                                                <p className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Linked Accounts</p>
-                                                {accounts.map((acc) => (
-                                                    <button
-                                                        key={acc.acctNo}
-                                                        onClick={() => { switchAccount(acc); setShowAccountMenu(false); }}
-                                                        className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center gap-2 ${
-                                                            acc.acctNo === acctNo
-                                                                ? 'bg-gray-50 font-semibold text-gray-900'
-                                                                : 'text-gray-700 hover:bg-gray-50'
-                                                        }`}
-                                                    >
-                                                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${acc.acctNo === acctNo ? 'bg-green-400' : 'bg-gray-300'}`}></div>
-                                                        <div className="flex flex-col min-w-0">
-                                                            <span className="truncate">{acc.accountName || acc.acctNo}</span>
-                                                            {acc.accountName && <span className="text-[10px] text-gray-400 truncate">{acc.acctNo}</span>}
-                                                        </div>
-                                                        {acc.acctNo === acctNo && (
-                                                            <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></div>
+                                                <span className="text-xs font-medium text-white max-w-[180px] truncate hidden md:block">
+                                                    {acctName || acctNo}
+                                                </span>
+                                                <svg className={`w-3 h-3 text-gray-400 transition-transform duration-300 ${showAccountMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                            </button>
+                                            {showAccountMenu && (
+                                                <div className="absolute right-0 mt-1 w-full bg-white rounded-lg shadow-2xl border border-gray-200 py-1 z-50">
+                                                    <p className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Linked Accounts</p>
+                                                    {accounts.map((acc) => (
+                                                        <button
+                                                            key={acc.acctNo}
+                                                            onClick={() => { switchAccount(acc); setShowAccountMenu(false); }}
+                                                            className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center gap-2 ${acc.acctNo === acctNo ? 'bg-gray-50 font-semibold text-gray-900' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                        >
+                                                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${acc.acctNo === acctNo ? 'bg-green-400' : 'bg-gray-300'}`}></div>
+                                                            <div className="flex flex-col min-w-0">
+                                                                <span className="truncate">{acc.accountName || acc.acctNo}</span>
+                                                                {acc.accountName && <span className="text-[10px] text-gray-400 truncate">{acc.acctNo}</span>}
+                                                            </div>
+                                                            {acc.acctNo === acctNo && (
+                                                                <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                                </svg>
+                                                            )}
+                                                        </button>
+                                                    ))}
+                                                    <div className="border-t border-gray-100 mt-1 pt-1">
+                                                        <button
+                                                            onClick={() => { setIsLinkDialogOpen(true); setShowAccountMenu(false); }}
+                                                            className="w-full px-3 py-2 text-left text-xs text-gray-500 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                                                        >
+                                                            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                                                             </svg>
-                                                        )}
-                                                    </button>
-                                                ))}
-                                                <div className="border-t border-gray-100 mt-1 pt-1">
-                                                    <button
-                                                        onClick={() => { setIsLinkDialogOpen(true); setShowAccountMenu(false); }}
-                                                        className="w-full px-3 py-2 text-left text-xs text-gray-500 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                                                    >
-                                                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                                        </svg>
-                                                        Link another account
-                                                    </button>
+                                                            Link another account
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    // No account linked
-                                    <button
-                                        onClick={() => setIsLinkDialogOpen(true)}
-                                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yellow-500 hover:bg-yellow-400 transition-colors text-black"
-                                    >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                        </svg>
-                                        <span className="text-[10px] font-bold">Link Account</span>
-                                    </button>
-                                )}
-                            </div>
-                        )}
+                                            )}
+                                        </>
+                                    ) : (
+                                        <button
+                                            onClick={() => setIsLinkDialogOpen(true)}
+                                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-yellow-500 hover:bg-yellow-400 transition-all duration-300 border border-yellow-400 text-black"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                            </svg>
+                                            <span className="text-xs font-medium hidden md:block">Link Account</span>
+                                        </button>
+                                    )}
+                                </div>
+                            )}
 
-                        {/* User Profile */}
-                        <div className="ml-auto py-2 relative">
+                            {/* User Profile */}
+                            <div className="relative" ref={userMenuRef}>
                             <button
                                 onClick={() => { setShowUserMenu(v => !v); setShowAccountMenu(false); }}
                                 className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
@@ -333,7 +329,11 @@ const LeadsGrid = () => {
                                     </button>
                                 </div>
                             )}
+                            </div>
+                            {/* end User Profile */}
+
                         </div>
+                        {/* end Right side */}
                     </div>
                 </div>
             </nav>
@@ -363,7 +363,7 @@ const LeadsGrid = () => {
                     </div>
                 )}
 
-                {isAccountLinked && (activeMenu === 'leads' ? (
+                {isAccountLinked && (
                     <div className="animate-fade-in">
                         {/* Action Buttons */}
                         <div className="mb-3 flex justify-start gap-2">
@@ -574,18 +574,7 @@ const LeadsGrid = () => {
                             </div>
                         </div>
                     </div>
-                ) : (
-                    <div className="text-center py-10 animate-fade-in">
-                        <div className="bg-white border border-gray-200 inline-block px-6 py-8 rounded-lg shadow-xl">
-                            <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            <h2 className="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
-                            <p className="text-gray-600 text-sm">Settings page coming soon...</p>
-                        </div>
-                    </div>
-                ))}
+                )}
             </div>
         </div>
     );

@@ -6,6 +6,7 @@ import ProtectedRoute from './ProtectedRoute';
 import LeadsGrid from './components/LeadsGrid';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
+import SettingsPage from './pages/SettingsPage';
 import LinkAccountDialog from './components/LinkAccountDialog';
 
 // Thin wrapper that reads AccountContext and renders the global link-account dialog
@@ -27,46 +28,56 @@ function AppRoutes() {
             {/* Global Link Account dialog — renders over any page */}
             <AccountDialogWrapper />
             <Routes>
-                    {/* Protected routes */}
-                    <Route
-                        path="/leads"
-                        element={
-                            <ProtectedRoute>
-                                <div className="min-h-screen bg-gray-100">
-                                    <LeadsGrid />
-                                </div>
-                            </ProtectedRoute>
-                        }
-                    />
+                {/* Protected routes */}
+                <Route
+                    path="/leads"
+                    element={
+                        <ProtectedRoute>
+                            <div className="min-h-screen bg-gray-100">
+                                <LeadsGrid />
+                            </div>
+                        </ProtectedRoute>
+                    }
+                />
 
-                    {/* Analytics Dashboard route */}
-                    <Route
-                        path="/analytics"
-                        element={
-                            <ProtectedRoute>
-                                <AnalyticsDashboardPage />
-                            </ProtectedRoute>
-                        }
-                    />
+                {/* Settings route */}
+                <Route
+                    path="/settings"
+                    element={
+                        <ProtectedRoute>
+                            <SettingsPage />
+                        </ProtectedRoute>
+                    }
+                />
 
-                    {/* Unauthorized route (public) */}
-                    <Route
-                        path="/unauthorized"
-                        element={<UnauthorizedPage />}
-                    />
+                {/* Analytics Dashboard route */}
+                <Route
+                    path="/analytics"
+                    element={
+                        <ProtectedRoute>
+                            <AnalyticsDashboardPage />
+                        </ProtectedRoute>
+                    }
+                />
 
-                    {/* Default redirect */}
-                    <Route
-                        path="/"
-                        element={<Navigate to="/leads" replace />}
-                    />
+                {/* Unauthorized route (public) */}
+                <Route
+                    path="/unauthorized"
+                    element={<UnauthorizedPage />}
+                />
 
-                    {/* Catch-all redirect */}
-                    <Route
-                        path="*"
-                        element={<Navigate to="/leads" replace />}
-                    />
-                </Routes>
+                {/* Default redirect */}
+                <Route
+                    path="/"
+                    element={<Navigate to="/leads" replace />}
+                />
+
+                {/* Catch-all redirect */}
+                <Route
+                    path="*"
+                    element={<Navigate to="/leads" replace />}
+                />
+            </Routes>
         </AccountProvider>
     );
 }
