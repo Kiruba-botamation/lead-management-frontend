@@ -226,7 +226,6 @@ const ProfilePage = () => {
                                                 onClick={() => { setShowAccountMenu(v => !v); setShowUserMenu(false); }}
                                                 className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
                                             >
-                                                <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></div>
                                                 <span className="text-xs font-medium text-white max-w-[180px] truncate hidden md:block">{acctName || acctNo}</span>
                                                 <svg className={`w-3 h-3 text-gray-400 transition-transform duration-300 ${showAccountMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -237,18 +236,12 @@ const ProfilePage = () => {
                                                     <p className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Linked Accounts</p>
                                                     {accounts.map((acc) => (
                                                         <button key={acc.acctNo} onClick={() => { switchAccount(acc); setShowAccountMenu(false); }}
-                                                            className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center gap-2 ${acc.acctNo === acctNo ? 'bg-gray-50 font-semibold text-gray-900' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                            className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center gap-2 ${acc.acctNo === acctNo ? 'bg-gray-50 font-bold text-gray-900' : 'text-gray-700 hover:bg-gray-50'}`}
                                                         >
-                                                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${acc.acctNo === acctNo ? 'bg-green-400' : 'bg-gray-300'}`}></div>
                                                             <div className="flex flex-col min-w-0">
                                                                 <span className="truncate">{acc.accountName || acc.acctNo}</span>
                                                                 {acc.accountName && <span className="text-[10px] text-gray-400 truncate">{acc.acctNo}</span>}
                                                             </div>
-                                                            {acc.acctNo === acctNo && (
-                                                                <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                                </svg>
-                                                            )}
                                                         </button>
                                                     ))}
                                                     <div className="border-t border-gray-100 mt-1 pt-1">

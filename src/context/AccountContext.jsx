@@ -13,6 +13,7 @@ import {
     setAcctInLocalStorage,
     updateUrlWithAcctNo,
     resolveActiveAcctNo,
+    getAcctNoFromUrl,
 } from '../utils/accountHelpers';
 
 const AccountContext = createContext(null);
@@ -70,12 +71,14 @@ export const AccountProvider = ({ children }) => {
                 } else {
                     setIsAccountLinked(true);
                     // Resolve active account: URL param → localStorage → first in list
+                    const urlAcctNo = getAcctNoFromUrl(location.search);
                     const activeNo = resolveActiveAcctNo(location.search);
                     const active =
                         cleaned.find((a) => a.acctNo === activeNo) || cleaned[0];
 
                     applySelectedAccount(active);
-                    if (!activeNo || activeNo !== active.acctNo) {
+                    // Always update URL if the ?acc= param is missing or doesn't match
+                    if (!urlAcctNo || urlAcctNo !== active.acctNo) {
                         updateUrlWithAcctNo(active.acctNo, navigate, location);
                     }
                 }
