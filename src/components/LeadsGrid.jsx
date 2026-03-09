@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
+import AccountCombobox from './AccountCombobox';
+import { useNotifications } from './Notifications';
+import DeleteConfirmation from './DeleteConfirmation';
 
 const LeadsGrid = () => {
     const navigate = useNavigate();
@@ -17,29 +20,30 @@ const LeadsGrid = () => {
         setIsLinkDialogOpen,
         switchAccount,
     } = useAccount();
+    const { showSuccess, showError, NotificationComponent } = useNotifications();
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [fields, setFields] = useState([]);
+    const [adminsMap, setAdminsMap] = useState({});
     const [showUserMenu, setShowUserMenu] = useState(false);
-    const [showAccountMenu, setShowAccountMenu] = useState(false);
 
-    const accountMenuRef = useRef(null);
+    // Delete confirmation state
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [leadToDelete, setLeadToDelete] = useState(null);
+
     const userMenuRef = useRef(null);
 
     // Close dropdowns when clicking outside
     useEffect(() => {
         const handleClickOutside = (e) => {
-            if (accountMenuRef.current && !accountMenuRef.current.contains(e.target)) {
-                setShowAccountMenu(false);
-            }
             if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
                 setShowUserMenu(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, []);;
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -83,7 +87,10 @@ const LeadsGrid = () => {
             if ((response.data.data || []).length > 0) {
                 const firstLead = response.data.data[0];
                 const excludeFields = ['__v', 'updatedAt', '_id'];
-                const displayFields = Object.keys(firstLead).filter(field => !excludeFields.includes(field));
+                const rawFields = Object.keys(firstLead).filter(field => !excludeFields.includes(field));
+                const displayFields = rawFields.includes('adminId')
+                    ? ['adminId', ...rawFields.filter(f => f !== 'adminId')]
+                    : rawFields;
                 setFields(displayFields);
 
                 if (Object.keys(filters).length === 0) {
@@ -105,6 +112,22 @@ const LeadsGrid = () => {
     useEffect(() => {
         fetchLeads();
     }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctNo, isAccountLinked]);
+
+    // Fetch admins and build a lookup map keyed by adminId
+    useEffect(() => {
+        if (!acctNo) return;
+        api.get('/api/accounts/admins', { params: { acctNo } })
+            .then((res) => {
+                const list = Array.isArray(res.data) ? res.data : (res.data.admins || res.data.data || []);
+                const map = {};
+                list.forEach((admin) => {
+                    const id = admin.adminId || admin._id || admin.id;
+                    if (id) map[String(id)] = admin;
+                });
+                setAdminsMap(map);
+            })
+            .catch(() => { });
+    }, [acctNo]);
 
     // Handle sorting
     const handleSort = (field) => {
@@ -141,6 +164,26 @@ const LeadsGrid = () => {
         }
     };
 
+    // Handle delete lead button click
+    const handleDeleteClick = (lead) => {
+        setLeadToDelete(lead);
+        setDeleteDialogOpen(true);
+    };
+
+    // Handle delete confirmation
+    const handleDeleteConfirm = async () => {
+        setDeleteDialogOpen(false);
+        // TODO: wire up delete API call, e.g.:
+        // try {
+        //     await api.delete(`/api/leads/${leadToDelete._id}`);
+        //     showSuccess('Lead deleted successfully.');
+        //     fetchLeads();
+        // } catch (err) {
+        //     showError(err.message || 'Failed to delete lead.');
+        // }
+        setLeadToDelete(null);
+    };
+
     // Pagination handlers
     const goToPage = (page) => {
         if (page >= 1 && page <= totalPages) {
@@ -169,6 +212,7 @@ const LeadsGrid = () => {
 
     // Helper to format field names for display
     const formatFieldName = (field) => {
+        if (field === 'adminId') return 'Admin Name';
         return field
             .replace(/([A-Z])/g, ' $1')
             .replace(/^./, str => str.toUpperCase())
@@ -188,6 +232,14 @@ const LeadsGrid = () => {
 
     return (
         <div className="min-h-screen bg-gray-50">
+            <NotificationComponent />
+            <DeleteConfirmation
+                isOpen={deleteDialogOpen}
+                onClose={() => { setDeleteDialogOpen(false); setLeadToDelete(null); }}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Lead"
+                message="Are you sure you want to delete this lead? This action cannot be undone."
+            />
             {/* Navigation Menu */}
             <nav className="bg-black border-b border-gray-800 animate-fade-in shadow-lg">
                 <div className="container mx-auto px-4">
@@ -211,6 +263,17 @@ const LeadsGrid = () => {
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-t-full"></div>
                             </button>
                             <button
+                                onClick={() => navigate('/admin')}
+                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative text-gray-400 hover:bg-gray-900 hover:text-white"
+                            >
+                                <div className="flex items-center gap-1.5">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Admin
+                                </div>
+                            </button>
+                            <button
                                 onClick={() => navigate('/settings')}
                                 className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative text-gray-400 hover:bg-gray-900 hover:text-white"
                             >
@@ -228,68 +291,21 @@ const LeadsGrid = () => {
                         <div className="ml-auto py-2 flex items-center gap-2">
 
                             {/* Account dropdown */}
-                            {accountsLoaded && (
-                                <div className="relative" ref={accountMenuRef}>
-                                    {isAccountLinked && acctNo ? (
-                                        <>
-                                            <button
-                                                onClick={() => { setShowAccountMenu(v => !v); setShowUserMenu(false); }}
-                                                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
-                                            >
-                                                <span className="text-xs font-medium text-white max-w-[180px] truncate hidden md:block">
-                                                    {acctName || acctNo}
-                                                </span>
-                                                <svg className={`w-3 h-3 text-gray-400 transition-transform duration-300 ${showAccountMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                </svg>
-                                            </button>
-                                            {showAccountMenu && (
-                                                <div className="absolute right-0 mt-1 w-full bg-white rounded-lg shadow-2xl border border-gray-200 py-1 z-50">
-                                                    <p className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Linked Accounts</p>
-                                                    {accounts.map((acc) => (
-                                                        <button
-                                                            key={acc.acctNo}
-                                                            onClick={() => { switchAccount(acc); setShowAccountMenu(false); }}
-                                                            className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center gap-2 ${acc.acctNo === acctNo ? 'bg-gray-50 font-bold text-gray-900' : 'text-gray-700 hover:bg-gray-50'}`}
-                                                        >
-                                                            <div className="flex flex-col min-w-0">
-                                                                <span className="truncate">{acc.accountName || acc.acctNo}</span>
-                                                                {acc.accountName && <span className="text-[10px] text-gray-400 truncate">{acc.acctNo}</span>}
-                                                            </div>
-                                                        </button>
-                                                    ))}
-                                                    <div className="border-t border-gray-100 mt-1 pt-1">
-                                                        <button
-                                                            onClick={() => { setIsLinkDialogOpen(true); setShowAccountMenu(false); }}
-                                                            className="w-full px-3 py-2 text-left text-xs text-gray-500 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                                                        >
-                                                            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                                            </svg>
-                                                            Link another account
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <button
-                                            onClick={() => setIsLinkDialogOpen(true)}
-                                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-yellow-500 hover:bg-yellow-400 transition-all duration-300 border border-yellow-400 text-black"
-                                        >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                            </svg>
-                                            <span className="text-xs font-medium hidden md:block">Link Account</span>
-                                        </button>
-                                    )}
-                                </div>
-                            )}
+                            <AccountCombobox
+                                accounts={accounts}
+                                acctNo={acctNo}
+                                acctName={acctName}
+                                isAccountLinked={isAccountLinked}
+                                accountsLoaded={accountsLoaded}
+                                switchAccount={switchAccount}
+                                setIsLinkDialogOpen={setIsLinkDialogOpen}
+                                onOpen={() => setShowUserMenu(false)}
+                            />
 
                             {/* User Profile */}
                             <div className="relative" ref={userMenuRef}>
                                 <button
-                                    onClick={() => { setShowUserMenu(v => !v); setShowAccountMenu(false); }}
+                                    onClick={() => { setShowUserMenu(v => !v); }}
                                     className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 transition-all duration-300 border border-gray-700"
                                 >
                                     {(() => {
@@ -301,7 +317,7 @@ const LeadsGrid = () => {
                                                 {user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'U'}
                                             </div>;
                                     })()}
-                                    <span className="text-xs font-medium text-white hidden md:block">{user?.name || user?.email || 'User'}</span>
+                                    <span className="text-xs font-medium text-white hidden md:block">{user?.email || user?.name || 'User'}</span>
                                     <svg className={`w-3 h-3 text-gray-400 transition-transform duration-300 ${showUserMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                     </svg>
@@ -453,7 +469,10 @@ const LeadsGrid = () => {
                                             <tr>
                                                 <td colSpan={fields.length + 1} className="px-3 py-6 text-center">
                                                     <div className="flex flex-col justify-center items-center gap-2">
-                                                        <div className="spinner"></div>
+                                                        <div className="relative">
+                                                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300"></div>
+                                                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-black border-t-transparent absolute top-0"></div>
+                                                        </div>
                                                         <span className="text-gray-600 text-xs font-medium">Loading leads...</span>
                                                     </div>
                                                 </td>
@@ -472,11 +491,49 @@ const LeadsGrid = () => {
                                         ) : (
                                             leads.map((lead, index) => (
                                                 <tr key={lead._id} className="hover:bg-gray-50 transition-all duration-200" style={{ animationDelay: `${index * 50}ms` }}>
-                                                    {fields.map((field) => (
-                                                        <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
-                                                            {formatFieldValue(field, lead[field])}
-                                                        </td>
-                                                    ))}
+                                                    {fields.map((field) => {
+                                                        if (field === 'adminId') {
+                                                            if (!lead.adminId) {
+                                                                return (
+                                                                    <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">-</td>
+                                                                );
+                                                            }
+                                                            const admin = adminsMap[String(lead.adminId)];
+                                                            const imgUrl = admin && (admin.profileImage || admin.profileImageUrl || admin.avatar || admin.photo);
+                                                            const adminName = admin
+                                                                ? (admin.firstName
+                                                                    ? `${admin.firstName}${admin.lastName ? ' ' + admin.lastName : ''}`
+                                                                    : admin.name || admin.fullName || admin.username || admin.adminName || '-')
+                                                                : '-';
+                                                            const initial = adminName !== '-' ? adminName.charAt(0).toUpperCase() : '?';
+                                                            const COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0284c7'];
+                                                            const avatarColor = COLORS[(initial.charCodeAt(0) || 0) % COLORS.length];
+                                                            return (
+                                                                <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
+                                                                    <div className="flex items-center justify-center gap-1.5">
+                                                                        {imgUrl ? (
+                                                                            <img
+                                                                                src={imgUrl}
+                                                                                alt="admin"
+                                                                                className="w-5 h-5 rounded-full object-cover border border-gray-200 flex-shrink-0"
+                                                                                onError={(e) => { e.target.style.display = 'none'; }}
+                                                                            />
+                                                                        ) : (
+                                                                            <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-[9px] select-none" style={{ backgroundColor: avatarColor }}>
+                                                                                {initial}
+                                                                            </span>
+                                                                        )}
+                                                                        <span>{adminName}</span>
+                                                                    </div>
+                                                                </td>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
+                                                                {formatFieldValue(field, lead[field])}
+                                                            </td>
+                                                        );
+                                                    })}
                                                     <td className="px-3 py-2 whitespace-nowrap text-xs text-center">
                                                         <div className="flex gap-1.5 justify-center">
                                                             <button
@@ -490,6 +547,7 @@ const LeadsGrid = () => {
                                                             <button
                                                                 className="p-1 text-gray-900 hover:bg-gray-100 rounded transition-all duration-200 hover:scale-110 border border-gray-200"
                                                                 title="Delete"
+                                                                onClick={() => handleDeleteClick(lead)}
                                                             >
                                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />

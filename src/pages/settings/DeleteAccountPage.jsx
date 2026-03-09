@@ -8,11 +8,15 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
 import { useAccount } from '../../context/AccountContext';
+import { useNotifications } from '../../components/Notifications';
+import ConfirmationDialog from '../../components/ConfirmationDialog';
+import LoadingMask from '../../components/LoadingMask';
 
 const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
     const navigate = useNavigate();
     const { logout } = useAuth();
     const { fetchAccounts } = useAccount();
+    const { showError, NotificationComponent } = useNotifications();
 
     const resolvedAcctId = acctIdProp || localStorage.getItem('acctId') || '';
 
@@ -31,16 +35,19 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
         typedAcctNo.trim().toLowerCase() !== '' &&
         typedAcctNo.trim().toLowerCase() === storedAcctNo.trim().toLowerCase();
 
-    const showError = (msg) => setError(msg);
+    const handleShowError = (msg) => {
+        setError(msg);
+        showError(msg);
+    };
 
     const handleDeleteRequest = () => {
         setError('');
         if (!resolvedAcctId) {
-            showError('No Account ID found. Please select an account first.');
+            handleShowError('No Account ID found. Please select an account first.');
             return;
         }
         if (!isAccountNoMatch) {
-            showError('Account verification failed: the entered Account No. does not match your account.');
+            handleShowError('Account verification failed: the entered Account No. does not match your account.');
             return;
         }
         setIsConfirmOpen(true);
@@ -50,14 +57,14 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
         setError('');
 
         if (!isAccountNoMatch) {
-            showError('Account verification failed: the entered Account No. does not match your account.');
+            handleShowError('Account verification failed: the entered Account No. does not match your account.');
             setIsConfirmOpen(false);
             return;
         }
 
         const userId = localStorage.getItem('userId');
         if (!userId) {
-            showError('User ID not found. Please log in again.');
+            handleShowError('User ID not found. Please log in again.');
             setIsConfirmOpen(false);
             return;
         }
@@ -105,7 +112,7 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
                 navigate('/leads', { replace: true });
             }
         } catch (err) {
-            showError('Failed to delete account: ' + (err.message || 'Unknown error.'));
+            handleShowError('Failed to delete account: ' + (err.message || 'Unknown error.'));
             setIsDeleting(false);
             setIsLoading(false);
         }
@@ -113,6 +120,7 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
 
     return (
         <div className="max-w-xl">
+            <NotificationComponent />
             <h2 className="text-base font-bold text-gray-900 mb-1">Delete Account</h2>
             <p className="text-xs text-gray-500 mb-5">
                 Permanently delete this account and all its associated data. This action cannot be undone.
@@ -195,46 +203,28 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
             )}
 
             {/* Confirmation dialog */}
-            {isConfirmOpen && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setIsConfirmOpen(false)}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-start gap-3 mb-4">
-                            <div className="w-9 h-9 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-bold text-gray-900">Confirm Account Deletion</h3>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    You are about to permanently delete account{' '}
-                                    <span className="font-semibold text-gray-800">{storedAcctNo}</span>.
-                                    This cannot be undone.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 text-xs text-red-700">
-                            All leads, API keys, and account data will be permanently deleted.
-                        </div>
-                        <div className="flex gap-2 justify-end">
-                            <button onClick={() => setIsConfirmOpen(false)} className="px-4 py-2 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-                                Cancel
-                            </button>
-                            <button onClick={handleDeleteConfirm} className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
-                                Yes, Delete Permanently
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ConfirmationDialog
+                isOpen={isConfirmOpen}
+                onConfirm={handleDeleteConfirm}
+                onCancel={() => setIsConfirmOpen(false)}
+                title="Confirm Account Deletion"
+                message={`You are about to permanently delete account ${storedAcctNo}. This cannot be undone.`}
+                confirmText="Yes, Delete Permanently"
+                cancelText="Cancel"
+                variant="danger"
+                isLoading={isDeleting}
+                loadingText="Deleting..."
+                warningText="All leads, API keys, and account data will be permanently deleted."
+            />
 
             {/* Full-screen loading overlay */}
-            {isLoading && (
-                <div className="fixed inset-0 bg-black/70 z-50 flex flex-col items-center justify-center">
-                    <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p className="text-white text-sm font-medium">Deleting account...</p>
-                </div>
-            )}
+            <div className="fixed inset-0 z-50" style={{ pointerEvents: isLoading ? 'auto' : 'none' }}>
+                <LoadingMask
+                    loading={isLoading}
+                    title="Deleting account..."
+                    message="Please wait while we process your request."
+                />
+            </div>
         </div>
     );
 };

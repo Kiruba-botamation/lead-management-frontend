@@ -6,6 +6,7 @@ import {
     PieChart, Pie, Cell, BarChart, Bar, LineChart, Line,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
+import LoadingMask from '../components/LoadingMask';
 
 const AnalyticsDashboardPage = () => {
     const navigate = useNavigate();
@@ -265,9 +266,8 @@ const AnalyticsDashboardPage = () => {
         const yAxisLabel = chartConfig.yAxis?.label || 'Value';
 
         if (isLoading) return (
-            <div className="text-center py-12">
-                <div className="spinner mx-auto"></div>
-                <p className="text-gray-600 mt-4 text-sm font-medium">Loading chart data...</p>
+            <div className="relative py-12">
+                <LoadingMask loading={true} title="Loading chart data..." message="Please wait..." />
             </div>
         );
 

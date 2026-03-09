@@ -110,6 +110,14 @@ export const AccountProvider = ({ children }) => {
         }
     }, [authLoading, authenticated, accountsRefreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Re-apply ?acc= param whenever the pathname changes ────────────────────
+    // Ensures the acc number stays in the URL when navigating between pages.
+    useEffect(() => {
+        if (acctNo && !getAcctNoFromUrl(location.search)) {
+            updateUrlWithAcctNo(acctNo, navigate, location);
+        }
+    }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Switch active account ──────────────────────────────────────────────────
     const switchAccount = (account) => {
         applySelectedAccount(account);

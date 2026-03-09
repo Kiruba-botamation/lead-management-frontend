@@ -4,6 +4,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import api from '../../api/axiosConfig';
+import { useNotifications } from '../../components/Notifications';
+import ConfirmationDialog from '../../components/ConfirmationDialog';
 
 // Mask all characters except the last 4 (fixed-width mask so last 4 stay visible)
 const maskToken = (t) => {
@@ -13,10 +15,10 @@ const maskToken = (t) => {
 
 const ApiTab = ({ acctId: acctIdProp }) => {
     const resolvedAcctId = acctIdProp || localStorage.getItem('acctId') || '';
+    const { showSuccess, showError, NotificationComponent } = useNotifications();
 
     const [token, setToken] = useState('');      // always stores real token
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
     const [showToken, setShowToken] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
@@ -27,9 +29,8 @@ const ApiTab = ({ acctId: acctIdProp }) => {
     }, [resolvedAcctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchToken = async () => {
-        if (!resolvedAcctId) { setError('No account ID available.'); return; }
+        if (!resolvedAcctId) { showError('No account ID available.'); return; }
         setLoading(true);
-        setError('');
         try {
             const response = await api.post('/api/accounts/token', {
                 acctId: resolvedAcctId,
@@ -37,7 +38,7 @@ const ApiTab = ({ acctId: acctIdProp }) => {
             });
             setToken(response.data.apiKey || '');
         } catch (err) {
-            setError(err.message || 'Error fetching token.');
+            showError(err.message || 'Error fetching token.');
         } finally {
             setLoading(false);
         }
@@ -46,21 +47,19 @@ const ApiTab = ({ acctId: acctIdProp }) => {
     const handleShowHide = () => setShowToken(v => !v);
 
     const handleCopy = async () => {
-        setError('');
         try {
             if (!token) return;
             await navigator.clipboard.writeText(token);
             setCopySuccess(true);
             setTimeout(() => setCopySuccess(false), 2000);
         } catch (err) {
-            setError('Failed to copy token.');
+            showError('Failed to copy token.');
         }
     };
 
     const handleRegenerate = async () => {
-        if (!resolvedAcctId) { setError('No account ID available.'); return; }
+        if (!resolvedAcctId) { showError('No account ID available.'); return; }
         setLoading(true);
-        setError('');
         setShowConfirm(false);
         try {
             const response = await api.post('/api/accounts/token/regenerate', {
@@ -68,14 +67,16 @@ const ApiTab = ({ acctId: acctIdProp }) => {
             });
             if (response.status !== 200) throw new Error('Failed to regenerate token.');
             await fetchToken();
+            showSuccess('API key regenerated successfully.');
         } catch (err) {
-            setError(err.message || 'Error regenerating token.');
+            showError(err.message || 'Error regenerating token.');
             setLoading(false);
         }
     };
 
     return (
         <div className="max-w-xl">
+            <NotificationComponent />
             <h2 className="text-base font-bold text-gray-900 mb-1">API Key</h2>
             <p className="text-xs text-gray-500 mb-5">
                 Use this key to authenticate requests to the Lead Management API.
@@ -138,14 +139,6 @@ const ApiTab = ({ acctId: acctIdProp }) => {
             </div>
 
             {/* Inline error */}
-            {error && (
-                <p className="text-xs text-red-600 mb-3 flex items-center gap-1">
-                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    {error}
-                </p>
-            )}
 
             {/* Regenerate button */}
             <button
@@ -160,34 +153,18 @@ const ApiTab = ({ acctId: acctIdProp }) => {
             </button>
 
             {/* Regenerate confirmation dialog */}
-            {showConfirm && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowConfirm(false)}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-start gap-3 mb-4">
-                            <div className="w-9 h-9 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-bold text-gray-900">Regenerate API Key?</h3>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    The current key will be <span className="font-semibold text-red-600">permanently invalidated</span>.
-                                    Any integrations using the old key will stop working immediately.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex gap-2 justify-end">
-                            <button onClick={() => setShowConfirm(false)} className="px-4 py-2 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-                                Cancel
-                            </button>
-                            <button onClick={handleRegenerate} className="px-4 py-2 text-xs font-semibold text-white bg-black hover:bg-gray-800 rounded-lg transition-colors">
-                                Yes, Regenerate
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ConfirmationDialog
+                isOpen={showConfirm}
+                onConfirm={handleRegenerate}
+                onCancel={() => setShowConfirm(false)}
+                title="Regenerate API Key?"
+                message="The current key will be permanently invalidated. Any integrations using the old key will stop working immediately."
+                confirmText="Yes, Regenerate"
+                cancelText="Cancel"
+                variant="warning"
+                isLoading={loading}
+                loadingText="Regenerating..."
+            />
         </div>
     );
 };

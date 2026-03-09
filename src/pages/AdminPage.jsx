@@ -1,22 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useRef, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
-import ApiTab from './settings/ApiTab';
-import DeleteAccountPage from './settings/DeleteAccountPage';
+import AdminTab from './settings/AdminTab';
 import AccountCombobox from '../components/AccountCombobox';
 
-const TABS = [
-    { id: 'api', label: 'API Key' },
-    { id: 'deleteAccount', label: 'Delete Account' },
-];
-
-const SettingsPage = () => {
+const AdminPage = () => {
     const navigate = useNavigate();
-    const location = useLocation();
     const { user, userDetails, logout } = useAuth();
     const {
-        acctId,
         acctNo,
         acctName,
         accounts,
@@ -26,7 +18,6 @@ const SettingsPage = () => {
         switchAccount,
     } = useAccount();
 
-    const [activeTab, setActiveTab] = useState('api');
     const [showUserMenu, setShowUserMenu] = useState(false);
 
     const userMenuRef = useRef(null);
@@ -41,12 +32,9 @@ const SettingsPage = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Read ?acc= from URL for DeleteAccountPage
-    const accountFromUrl = new URLSearchParams(location.search).get('acc') || acctNo || '';
-
     return (
         <div className="min-h-screen bg-gray-50">
-            {/* ── Navbar (same style as LeadsGrid) ────────────────────────── */}
+            {/* ── Navbar ─────────────────────────────────────────────────────── */}
             <nav className="bg-black border-b border-gray-800 shadow-lg">
                 <div className="container mx-auto px-4">
                     <div className="flex items-center gap-4">
@@ -68,9 +56,9 @@ const SettingsPage = () => {
                                     Leads
                                 </div>
                             </button>
+                            {/* Admin — active */}
                             <button
-                                onClick={() => navigate('/admin')}
-                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative text-gray-400 hover:bg-gray-900 hover:text-white"
+                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative bg-gray-900 text-white shadow-lg"
                             >
                                 <div className="flex items-center gap-1.5">
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -78,9 +66,11 @@ const SettingsPage = () => {
                                     </svg>
                                     Admin
                                 </div>
+                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-t-full"></div>
                             </button>
                             <button
-                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative bg-gray-900 text-white shadow-lg"
+                                onClick={() => navigate('/settings')}
+                                className="px-3 py-2 text-xs font-semibold transition-all duration-300 rounded-t-lg relative text-gray-400 hover:bg-gray-900 hover:text-white"
                             >
                                 <div className="flex items-center gap-1.5">
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -89,14 +79,12 @@ const SettingsPage = () => {
                                     </svg>
                                     Settings
                                 </div>
-                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-t-full"></div>
                             </button>
                         </div>
 
                         {/* Right side: Account + User */}
                         <div className="ml-auto py-2 flex items-center gap-2">
 
-                            {/* Account dropdown */}
                             {/* Account dropdown */}
                             <AccountCombobox
                                 accounts={accounts}
@@ -156,51 +144,17 @@ const SettingsPage = () => {
                                     </div>
                                 )}
                             </div>
-                            {/* end User Profile */}
-
                         </div>
-                        {/* end Right side */}
                     </div>
                 </div>
             </nav>
 
             {/* ── Page body ─────────────────────────────────────────────────── */}
             <div className="container mx-auto px-4 py-6">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    {/* Tab bar */}
-                    <div className="border-b border-gray-200 px-6">
-                        <nav className="flex gap-0 -mb-px">
-                            {TABS.map((tab) => (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`px-4 py-3 text-xs font-semibold border-b-2 transition-colors ${activeTab === tab.id
-                                        ? 'border-black text-black'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                        }`}
-                                >
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </nav>
-                    </div>
-
-                    {/* Tab content */}
-                    <div className="p-6">
-                        {activeTab === 'api' && (
-                            <ApiTab acctId={acctId} />
-                        )}
-                        {activeTab === 'deleteAccount' && (
-                            <DeleteAccountPage
-                                acctId={acctId}
-                                accountFromUrl={accountFromUrl}
-                            />
-                        )}
-                    </div>
-                </div>
+                <AdminTab acctNo={acctNo} />
             </div>
         </div>
     );
 };
 
-export default SettingsPage;
+export default AdminPage;

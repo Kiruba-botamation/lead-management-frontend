@@ -14,6 +14,7 @@ export const AuthProvider = ({ children }) => {
     const [userDetails, setUserDetails] = useState(null);      // Full user profile from auth DB
     const [loading, setLoading] = useState(true);      // Auth check in progress
     const [authenticated, setAuthenticated] = useState(false); // Is session valid?
+    const [adminViewActive, setAdminViewActive] = useState(false); // True when viewing as an admin
 
     // Prevents duplicate checks in React StrictMode
     const authCheckedRef = useRef(false);
@@ -109,7 +110,11 @@ export const AuthProvider = ({ children }) => {
     return (
         <AuthContext.Provider value={{
             user,
+            setUser,
             userDetails,
+            setUserDetails,
+            adminViewActive,
+            setAdminViewActive,
             authenticated,
             loading,
             logout,

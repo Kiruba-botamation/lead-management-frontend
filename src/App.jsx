@@ -8,6 +8,7 @@ import UnauthorizedPage from './pages/UnauthorizedPage';
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
 import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
+import AdminPage from './pages/AdminPage';
 import LinkAccountDialog from './components/LinkAccountDialog';
 
 // Thin wrapper that reads AccountContext and renders the global link-account dialog
@@ -57,6 +58,16 @@ function AppRoutes() {
                     element={
                         <ProtectedRoute>
                             <SettingsPage />
+                        </ProtectedRoute>
+                    }
+                />
+
+                {/* Admin route */}
+                <Route
+                    path="/admin"
+                    element={
+                        <ProtectedRoute>
+                            <AdminPage />
                         </ProtectedRoute>
                     }
                 />
