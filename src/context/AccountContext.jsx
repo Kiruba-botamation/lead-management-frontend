@@ -8,6 +8,7 @@ import React, {
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAuth } from './AuthContext';
+import { useNotifications } from '../components/Notifications';
 import {
     cleanupAccounts,
     setAcctInLocalStorage,
@@ -40,6 +41,9 @@ export const AccountProvider = ({ children }) => {
 
     // ── Refresh trigger ────────────────────────────────────────────────────────
     const [accountsRefreshKey, setAccountsRefreshKey] = useState(0);
+
+    // ── Notifications ──────────────────────────────────────────────────────────
+    const { showSuccess, NotificationComponent } = useNotifications();
 
     // ── Fetch linked accounts from backend ────────────────────────────────────
     const fetchAccounts = useCallback(async () => {
@@ -147,6 +151,7 @@ export const AccountProvider = ({ children }) => {
         setIsLinkDialogOpen(false);
         updateUrlWithAcctNo(newAccount.acctNo, navigate, location);
         setAccountsRefreshKey((k) => k + 1);
+        showSuccess('Account linked successfully!');
     };
 
     return (
@@ -170,6 +175,7 @@ export const AccountProvider = ({ children }) => {
                 handleAccountLinked,
             }}
         >
+            <NotificationComponent />
             {children}
         </AccountContext.Provider>
     );

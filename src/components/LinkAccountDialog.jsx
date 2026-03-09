@@ -1,20 +1,19 @@
 /**
- * Step 1 — Link Account Dialog
+ * Link Account Dialog
  * User enters an Account Number, then clicks "Verify" to check it against the backend.
- * On success, opens the AccountVerificationDialog (Step 2).
+ * On success, links the account directly.
  */
 import React, { useState } from 'react';
 import api, { authApi } from '../api/axiosConfig';
-import AccountVerificationDialog from './AccountVerificationDialog';
+import { useNotifications } from './Notifications';
 
 const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
     const [acctNo, setAcctNo] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
-    const [isVerificationDialogOpen, setIsVerificationDialogOpen] = useState(false);
-    const [accountData, setAccountData] = useState(null);
     const [isLinked, setIsLinked] = useState(false);
 
+    const { showWarning, NotificationComponent } = useNotifications();
     const showError = (msg) => setError(msg);
     const clearError = () => setError('');
 
@@ -50,63 +49,32 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
             const data = response.data;
 
             if (data.success) {
-                const details = {
-                    acctNo: data.account?.acctNo || acctNo.trim(),
-                    accountName: data.account?.name || '',
-                    email: data.account?.email || '',
-                    phoneNo: data.account?.phone || '',
-                    timezone: data.account?.timezone || '',
-                };
-                setAccountData(details);
-                setIsVerificationDialogOpen(true);
+                setIsLinked(true);
+                if (onSave) {
+                    onSave({
+                        account: {
+                            acctNo: data.account?.acctNo || acctNo.trim(),
+                            name: data.account?.name || '',
+                            accountName: data.account?.name || '',
+                            timezone: data.account?.timezone || '',
+                        },
+                    });
+                }
+            } else if (data.emailMismatch) {
+                showWarning(data.message);
             } else {
                 showError(data.message || 'Failed to verify account. Please check the account number.');
             }
         } catch (err) {
-            showError('An error occurred while checking the account. Please try again.');
+            const errData = err.response?.data;
+            if (errData?.emailMismatch) {
+                showWarning(errData.message);
+            } else {
+                showError(errData?.message || 'An error occurred while checking the account. Please try again.');
+            }
             console.error('[LinkAccount] verifyAccount error:', err);
         } finally {
             setIsLoading(false);
-        }
-    };
-
-    const handleSaveUserData = async (userData) => {
-        clearError();
-
-        try {
-            const userId = localStorage.getItem('userId') || '';
-
-            const response = await api.post('/api/accounts/link-user', {
-                userData,
-                userId,
-            });
-
-            const result = response.data;
-
-            if (result.success) {
-                setIsLinked(true);
-                setIsVerificationDialogOpen(false);
-
-                // Notify parent (AccountContext / page)
-                if (onSave) {
-                    onSave({
-                        account: {
-                            acctNo: userData.acctNo,
-                            name: userData.accountName,
-                            accountName: userData.accountName,
-                            timezone: userData.timezone,
-                            ...userData,
-                        },
-                    });
-                }
-
-                onClose();
-            } else {
-                showError(result.message || 'Failed to save user data. Please try again.');
-            }
-        } catch (err) {
-            showError('An error occurred while saving your information. Please try again.');
-            console.error('[LinkAccount] accountLinkToUser error:', err);
         }
     };
 
@@ -114,8 +82,6 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
         setAcctNo('');
         setError('');
         setIsLoading(false);
-        setIsVerificationDialogOpen(false);
-        setAccountData(null);
         setIsLinked(false);
         onClose();
     };
@@ -124,6 +90,7 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
 
     return (
         <>
+            <NotificationComponent />
             {/* Backdrop */}
             <div
                 className="fixed inset-0 bg-black/60 z-40 flex items-center justify-center"
@@ -224,13 +191,6 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
                 </div>
             </div>
 
-            {/* Step 2 — Account Verification Dialog */}
-            <AccountVerificationDialog
-                isOpen={isVerificationDialogOpen}
-                onClose={() => setIsVerificationDialogOpen(false)}
-                onSave={handleSaveUserData}
-                accountData={accountData}
-            />
         </>
     );
 };
