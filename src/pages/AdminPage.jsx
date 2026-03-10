@@ -33,9 +33,9 @@ const AdminPage = () => {
     }, []);
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
             {/* ── Navbar ─────────────────────────────────────────────────────── */}
-            <nav className="bg-black border-b border-gray-800 shadow-lg">
+            <nav className="bg-black border-b border-gray-800 shadow-lg flex-shrink-0">
                 <div className="container mx-auto px-4">
                     <div className="flex items-center gap-4">
                         {/* Logo */}
@@ -150,7 +150,7 @@ const AdminPage = () => {
             </nav>
 
             {/* ── Page body ─────────────────────────────────────────────────── */}
-            <div className="container mx-auto px-4 py-6">
+            <div className="flex-1 overflow-hidden flex flex-col px-3 sm:px-4 py-3">
                 <AdminTab acctNo={acctNo} />
             </div>
         </div>

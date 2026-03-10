@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import api from '../api/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
@@ -27,12 +28,14 @@ const LeadsGrid = () => {
     const [fields, setFields] = useState([]);
     const [adminsMap, setAdminsMap] = useState({});
     const [showUserMenu, setShowUserMenu] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
 
     // Delete confirmation state
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [leadToDelete, setLeadToDelete] = useState(null);
 
     const userMenuRef = useRef(null);
+    const filterTimerRef = useRef(null);
 
     // Close dropdowns when clicking outside
     useEffect(() => {
@@ -140,28 +143,19 @@ const LeadsGrid = () => {
         setCurrentPage(1);
     };
 
-    // Handle filter input change
+    // Handle filter input change — auto-debounce server-side apply
     const handleFilterChange = (field, value) => {
-        setFilters({ ...filters, [field]: value });
-    };
-
-    // Apply filters
-    const applyFilters = () => {
-        const activeFilters = Object.keys(filters).reduce((acc, key) => {
-            if (filters[key]) {
-                acc[key] = filters[key];
-            }
-            return acc;
-        }, {});
-        setAppliedFilters(activeFilters);
-        setCurrentPage(1);
-    };
-
-    // Handle Enter key press in filter inputs
-    const handleFilterKeyDown = (e) => {
-        if (e.key === 'Enter') {
-            applyFilters();
-        }
+        setFilters(prev => ({ ...prev, [field]: value }));
+        if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+        filterTimerRef.current = setTimeout(() => {
+            setAppliedFilters(prev => {
+                const updated = { ...prev };
+                if (value) updated[field] = value;
+                else delete updated[field];
+                return updated;
+            });
+            setCurrentPage(1);
+        }, 600);
     };
 
     // Handle delete lead button click
@@ -182,6 +176,73 @@ const LeadsGrid = () => {
         //     showError(err.message || 'Failed to delete lead.');
         // }
         setLeadToDelete(null);
+    };
+
+    // Export to Excel with current filters
+    const handleExportExcel = async () => {
+        setIsExporting(true);
+        try {
+            const params = {
+                limit: 100000, // fetch all matching records
+                ...(sortField && { sortBy: sortField, sortOrder }),
+                ...(acctNo && { acctNo }),
+                ...appliedFilters
+            };
+
+            const response = await api.get('/api/leads', { params });
+            const allLeads = response.data.data || [];
+
+            if (allLeads.length === 0) {
+                showError('No data to export with the current filters.');
+                return;
+            }
+
+            // Build rows: exclude internal fields, resolve adminId -> name
+            const excludeFields = ['__v', 'updatedAt', '_id'];
+            const exportFields = fields.length > 0
+                ? fields
+                : Object.keys(allLeads[0]).filter(f => !excludeFields.includes(f));
+
+            const rows = allLeads.map(lead => {
+                const row = {};
+                exportFields.forEach(field => {
+                    if (field === 'adminId') {
+                        const admin = adminsMap[String(lead.adminId)];
+                        const adminName = admin
+                            ? (admin.firstName
+                                ? `${admin.firstName}${admin.lastName ? ' ' + admin.lastName : ''}`
+                                : admin.name || admin.fullName || admin.username || admin.adminName || lead.adminId)
+                            : (lead.adminId || '-');
+                        row['Admin Name'] = adminName;
+                    } else if (field === 'createdAt' || field.includes('Date') || field.includes('date')) {
+                        row[formatFieldName(field)] = lead[field] ? new Date(lead[field]).toLocaleDateString() : '-';
+                    } else {
+                        row[formatFieldName(field)] = lead[field] ?? '-';
+                    }
+                });
+                return row;
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(rows);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads');
+
+            // Auto-size columns
+            const colWidths = Object.keys(rows[0] || {}).map(key => ({
+                wch: Math.max(key.length, ...rows.map(r => String(r[key] ?? '').length)) + 2
+            }));
+            worksheet['!cols'] = colWidths;
+
+            const filterSuffix = Object.keys(appliedFilters).length > 0 ? '_filtered' : '';
+            const fileName = `leads${filterSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            XLSX.writeFile(workbook, fileName);
+            showSuccess(`Exported ${allLeads.length} lead${allLeads.length !== 1 ? 's' : ''} to ${fileName}`);
+        } catch (err) {
+            showError(err.message || 'Failed to export leads.');
+            console.error('Export error:', err);
+        } finally {
+            setIsExporting(false);
+        }
     };
 
     // Pagination handlers
@@ -231,7 +292,7 @@ const LeadsGrid = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
             <NotificationComponent />
             <DeleteConfirmation
                 isOpen={deleteDialogOpen}
@@ -241,7 +302,7 @@ const LeadsGrid = () => {
                 message="Are you sure you want to delete this lead? This action cannot be undone."
             />
             {/* Navigation Menu */}
-            <nav className="bg-black border-b border-gray-800 animate-fade-in shadow-lg">
+            <nav className="bg-black border-b border-gray-800 animate-fade-in shadow-lg flex-shrink-0">
                 <div className="container mx-auto px-4">
                     <div className="flex items-center gap-4">
                         {/* Logo */}
@@ -363,10 +424,10 @@ const LeadsGrid = () => {
             </nav>
 
             {/* Content Area */}
-            <div className="container mx-auto px-4 py-4">
+            <div className="flex-1 overflow-hidden flex flex-col px-3 sm:px-4 py-3">
                 {/* No Account Linked — full-page prompt */}
                 {accountsLoaded && !accountsLoading && !isAccountLinked && (
-                    <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
+                    <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
                         <div className="bg-white border border-gray-200 rounded-xl shadow-xl px-8 py-10 text-center max-w-sm">
                             <div className="w-14 h-14 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <svg className="w-7 h-7 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -388,25 +449,43 @@ const LeadsGrid = () => {
                 )}
 
                 {isAccountLinked && (
-                    <div className="animate-fade-in">
-                        {/* Action Buttons */}
-                        <div className="mb-3 flex justify-start gap-2">
+                    <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
+                        <div className="mb-3 flex-shrink-0 flex justify-start gap-2">
+                            {/* Clear Filters button */}
                             <button
                                 onClick={() => {
-                                    const clearedFilters = {};
-                                    fields.forEach(field => {
-                                        clearedFilters[field] = '';
-                                    });
-                                    setFilters(clearedFilters);
+                                    const cleared = {};
+                                    fields.forEach(f => { cleared[f] = ''; });
+                                    setFilters(cleared);
                                     setAppliedFilters({});
+                                    setCurrentPage(1);
                                 }}
-                                className="group relative w-8 h-8 bg-transparent rounded-lg hover:bg-gray-100 transition-all duration-300 flex items-center justify-center border border-gray-300 hover:border-gray-400 hover:scale-110 focus:ring-1 focus:ring-gray-400"
-                                title="Clear Filters"
+                                disabled={loading || Object.keys(appliedFilters).length === 0}
+                                className="group relative w-8 h-8 flex items-center justify-center bg-transparent rounded-lg hover:bg-red-50 transition-all duration-300 hover:scale-110 border border-gray-300 hover:border-red-400 focus:ring-1 focus:ring-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={Object.keys(appliedFilters).length > 0 ? `Clear ${Object.keys(appliedFilters).length} active filter${Object.keys(appliedFilters).length !== 1 ? 's' : ''}` : 'No active filters'}
                             >
-                                <svg className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                                    <line x1="18" y1="6" x2="6" y2="18" strokeWidth={2} strokeLinecap="round" />
+                                <svg className="w-4 h-4 text-gray-600 group-hover:text-red-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6l12 12" />
                                 </svg>
+                            </button>
+
+                            {/* Export to Excel — icon-only */}
+                            <button
+                                onClick={handleExportExcel}
+                                disabled={isExporting || loading}
+                                className="group relative w-8 h-8 flex items-center justify-center bg-transparent rounded-lg hover:bg-emerald-50 transition-all duration-300 hover:scale-110 border border-gray-300 hover:border-emerald-500 focus:ring-1 focus:ring-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={isExporting ? 'Exporting...' : (Object.keys(appliedFilters).length > 0 ? `Export filtered leads (${totalRecords}) to Excel` : 'Export all leads to Excel')}
+                            >
+                                {isExporting ? (
+                                    <svg className="w-4 h-4 text-emerald-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-4 h-4 text-gray-600 group-hover:text-emerald-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                                    </svg>
+                                )}
                             </button>
 
                             <button
@@ -421,7 +500,7 @@ const LeadsGrid = () => {
                         </div>
 
                         {/* Table Section */}
-                        <div className="bg-white rounded-lg shadow-2xl overflow-hidden border border-gray-200 animate-scale-in">
+                        <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white rounded-lg shadow-2xl border border-gray-200 animate-scale-in">
                             {error && (
                                 <div className="bg-gray-100 border-l-4 border-black text-gray-900 px-3 py-2 m-3 rounded-lg">
                                     <div className="flex items-center gap-2">
@@ -433,7 +512,7 @@ const LeadsGrid = () => {
                                 </div>
                             )}
 
-                            <div className="overflow-x-auto">
+                            <div className="flex-1 overflow-auto min-h-0">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-black">
                                         <tr>
@@ -453,7 +532,6 @@ const LeadsGrid = () => {
                                                         placeholder="Filter..."
                                                         value={filters[field] || ''}
                                                         onChange={(e) => handleFilterChange(field, e.target.value)}
-                                                        onKeyDown={handleFilterKeyDown}
                                                         onClick={(e) => e.stopPropagation()}
                                                         className="w-full px-2 py-1 text-[10px] border border-gray-700 bg-gray-900 text-white rounded focus:ring-1 focus:ring-gray-500 focus:border-transparent placeholder-gray-500 transition-all text-center"
                                                     />
@@ -505,26 +583,30 @@ const LeadsGrid = () => {
                                                                     ? `${admin.firstName}${admin.lastName ? ' ' + admin.lastName : ''}`
                                                                     : admin.name || admin.fullName || admin.username || admin.adminName || '-')
                                                                 : '-';
-                                                            const initial = adminName !== '-' ? adminName.charAt(0).toUpperCase() : '?';
+                                                            const initial = adminName !== '-' ? adminName.charAt(0).toUpperCase() : null;
                                                             const COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0284c7'];
-                                                            const avatarColor = COLORS[(initial.charCodeAt(0) || 0) % COLORS.length];
+                                                            const avatarColor = initial ? COLORS[(initial.charCodeAt(0) || 0) % COLORS.length] : null;
                                                             return (
                                                                 <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
-                                                                    <div className="flex items-center justify-center gap-1.5">
-                                                                        {imgUrl ? (
-                                                                            <img
-                                                                                src={imgUrl}
-                                                                                alt="admin"
-                                                                                className="w-5 h-5 rounded-full object-cover border border-gray-200 flex-shrink-0"
-                                                                                onError={(e) => { e.target.style.display = 'none'; }}
-                                                                            />
-                                                                        ) : (
-                                                                            <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-[9px] select-none" style={{ backgroundColor: avatarColor }}>
-                                                                                {initial}
-                                                                            </span>
-                                                                        )}
-                                                                        <span>{adminName}</span>
-                                                                    </div>
+                                                                    {adminName === '-' ? (
+                                                                        <span>-</span>
+                                                                    ) : (
+                                                                        <div className="flex items-center justify-center gap-1.5">
+                                                                            {imgUrl ? (
+                                                                                <img
+                                                                                    src={imgUrl}
+                                                                                    alt="admin"
+                                                                                    className="w-5 h-5 rounded-full object-cover border border-gray-200 flex-shrink-0"
+                                                                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                                                                />
+                                                                            ) : (
+                                                                                <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-[9px] select-none" style={{ backgroundColor: avatarColor }}>
+                                                                                    {initial}
+                                                                                </span>
+                                                                            )}
+                                                                            <span>{adminName}</span>
+                                                                        </div>
+                                                                    )}
                                                                 </td>
                                                             );
                                                         }
@@ -563,7 +645,7 @@ const LeadsGrid = () => {
                             </div>
 
                             {/* Pagination Section */}
-                            <div className="bg-gray-50 px-3 py-2 flex items-center justify-between border-t border-gray-200">
+                            <div className="flex-shrink-0 bg-gray-50 px-3 py-2 flex items-center justify-between border-t border-gray-200">
                                 <div className="flex-1 flex justify-between sm:hidden">
                                     <button
                                         onClick={() => goToPage(currentPage - 1)}
