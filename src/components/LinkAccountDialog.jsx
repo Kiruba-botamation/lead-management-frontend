@@ -146,7 +146,7 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
                                     value={acctNo}
                                     onChange={(e) => { setAcctNo(e.target.value); clearError(); }}
                                     onKeyDown={(e) => e.key === 'Enter' && checkAccountNo()}
-                                    placeholder="e.g. ACCT-001"
+                                    placeholder="e.g. 543211"
                                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent transition-all outline-none"
                                     disabled={isLoading}
                                     autoFocus

@@ -22,9 +22,15 @@
         "vite": "^5.0.8"
     },
     "scripts": {
-        "start": "vite",
-        "dev": "vite",
+        "start": "vite --mode development",
+        "dev": "vite --mode development",
         "build": "vite build",
         "preview": "vite preview"
+    },
+    "scriptsInfo": {
+        "start": "Loads .env.development",
+        "dev": "Loads .env.development",
+        "build": "Loads .env.production",
+        "preview": "Loads .env.production (previews build output)"
     }
 }
