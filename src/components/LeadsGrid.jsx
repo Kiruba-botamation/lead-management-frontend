@@ -7,6 +7,7 @@ import { useAccount } from '../context/AccountContext';
 import AccountCombobox from './AccountCombobox';
 import { useNotifications } from './Notifications';
 import DeleteConfirmation from './DeleteConfirmation';
+import LoadingMask from './LoadingMask';
 
 const LeadsGrid = () => {
     const navigate = useNavigate();
@@ -241,7 +242,7 @@ const LeadsGrid = () => {
                 ...appliedFilters
             };
 
-            const response = await api.get('/api/ui/leads', { params });
+            const response = await api.get('/api/ui/leads', { params, timeout: 120000 });
             const allLeads = response.data.data || [];
 
             if (allLeads.length === 0) {
@@ -338,7 +339,8 @@ const LeadsGrid = () => {
     };
 
     return (
-        <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
+        <div className="h-screen flex flex-col bg-gray-50 overflow-hidden relative">
+            <LoadingMask loading={isExporting} title="Exporting..." message="Please wait while we export your leads to Excel" />
             <NotificationComponent />
             <DeleteConfirmation
                 isOpen={deleteDialogOpen}
