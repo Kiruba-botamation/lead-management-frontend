@@ -64,6 +64,7 @@ export function Combobox({
   disabled = false,
   loading = false,
   emptyText = 'No options',
+  size = 'md',
   className = '',
   dropdownClassName = '',
   id: externalId,
@@ -178,7 +179,7 @@ export function Combobox({
           role="combobox"
           aria-expanded={open}
           aria-haspopup="listbox"
-          className="ds-combobox__input"
+          className={['ds-combobox__input', size !== 'md' ? `ds-combobox__input--${size}` : ''].filter(Boolean).join(' ')}
           value={displayValue}
           placeholder={placeholder}
           readOnly={!searchable}
@@ -221,7 +222,7 @@ export function Combobox({
       {open && createPortal(
         <div
           ref={listRef}
-          className={['ds-combobox__panel', dropdownClassName].filter(Boolean).join(' ')}
+          className={['ds-combobox__panel', size !== 'md' ? `ds-combobox__panel--${size}` : '', dropdownClassName].filter(Boolean).join(' ')}
           role="listbox"
           style={{
             position: 'absolute',
@@ -325,6 +326,7 @@ Combobox.propTypes = {
   disabled: PropTypes.bool,
   loading: PropTypes.bool,
   emptyText: PropTypes.string,
+  size: PropTypes.oneOf(['sm', 'md', 'lg']),
   className: PropTypes.string,
   id: PropTypes.string,
 };

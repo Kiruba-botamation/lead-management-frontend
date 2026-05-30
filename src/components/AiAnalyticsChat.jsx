@@ -533,20 +533,21 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, categories = [], currentChar
     // Fetch fields for all categories to use in welcome message examples
     useEffect(() => {
         if (!acctId || categories.length === 0) return;
-        api.get('/api/ui/leads/fields', { params: { acctId } })
-            .then(res => {
-                const raw = res.data;
-                const fields = {};
-                if (Array.isArray(raw?.categories)) {
-                    raw.categories.forEach(cat => {
-                        if (cat.categoryId && Array.isArray(cat.fields)) {
-                            fields[cat.categoryId] = cat.fields.filter(f => typeof f === 'string');
-                        }
-                    });
-                }
-                setCategoryFields(fields);
-            })
-            .catch(() => {}); // silent — welcome message falls back to generic
+        // Fetch fields per category using the new category fields endpoint
+        Promise.all(
+            categories.map(cat =>
+                api.get(`/api/ui/leads/categories/${cat._id}/fields`, { params: { acctId } })
+                    .then(res => ({ categoryId: cat._id, fields: res.data?.data?.fields || [] }))
+                    .catch(() => ({ categoryId: cat._id, fields: [] }))
+            )
+        ).then(results => {
+            const fields = {};
+            results.forEach(({ categoryId, fields: catFields }) => {
+                // Store labels (human-readable) for welcome message
+                fields[categoryId] = catFields.map(f => f.label).filter(Boolean);
+            });
+            setCategoryFields(fields);
+        });
     }, [acctId, categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Lock body scroll when panel is open to prevent double scrollbar
@@ -600,13 +601,6 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, categories = [], currentChar
     const showWelcome = () => {
         const welcomeId = ++messageIdRef.current;
 
-        // Convert camelCase / snake_case field names to readable labels
-        const toLabel = (field) =>
-            field
-                .replace(/_/g, ' ')
-                .replace(/([a-z])([A-Z])/g, '$1 $2')
-                .replace(/\b\w/g, c => c.toUpperCase());
-
         let text;
         let quickReplies;
 
@@ -615,14 +609,13 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, categories = [], currentChar
             const primary = names[0];
             const primaryId = categories[0]._id;
             const second = names[1] || names[0];
-            const secondId = (categories[1] || categories[0])._id;
 
-            // Pick up to 2 real fields from the primary category
-            const primaryFieldRaw = (categoryFields[primaryId] || []).filter(f => f);
-            const field1 = primaryFieldRaw[0] ? toLabel(primaryFieldRaw[0]) : null;
-            const field2 = primaryFieldRaw[1] ? toLabel(primaryFieldRaw[1]) : null;
+            // categoryFields now stores labels directly (no conversion needed)
+            const primaryLabels = (categoryFields[primaryId] || []).filter(Boolean);
+            const field1 = primaryLabels[0] || null;
+            const field2 = primaryLabels[1] || null;
 
-            // Build example bullets using real fields where available, else time-based fallback
+            // Build example bullets using real field labels where available
             const bullets = [
                 `"Show me daily ${primary} leads this month"`,
                 field1

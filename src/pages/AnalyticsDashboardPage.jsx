@@ -1602,41 +1602,36 @@ const AnalyticsDashboardPage = () => {
     const fetchFieldsForCategory = async (catId) => {
         if (!catId || !acctId) return [];
         if (categoryFieldsCache[catId]?.length > 0) return categoryFieldsCache[catId];
-        // Use a single shared promise key per acctId so concurrent calls share one request
-        const promiseKey = `__all__${acctId}`;
+        // Deduplicate concurrent requests for the same category
+        const promiseKey = `${catId}__${acctId}`;
         if (fieldsFetchPromisesRef.current[promiseKey]) {
-            const allResults = await fieldsFetchPromisesRef.current[promiseKey];
-            return allResults[catId] || [];
+            return await fieldsFetchPromisesRef.current[promiseKey];
         }
 
         const promise = (async () => {
             try {
-                const response = await api.get('/api/ui/leads/fields', { params: { acctId } });
-                const raw = response.data;
+                const response = await api.get(`/api/ui/leads/categories/${catId}/fields`, { params: { acctId } });
+                const rawFields = response.data?.data?.fields || [];
 
-                // Cache ALL categories' raw fields (no filtering here — filter at read time)
-                const allResults = {};
-                if (Array.isArray(raw?.categories)) {
-                    raw.categories.forEach(cat => {
-                        if (cat.categoryId && Array.isArray(cat.fields)) {
-                            allResults[cat.categoryId] = cat.fields.filter(f => typeof f === 'string');
-                        }
-                    });
-                }
+                // Append system timestamp fields as column options
+                const allFields = [
+                    ...rawFields,
+                    { field: 'createdAt', label: 'Created At', type: 'date' },
+                    { field: 'updatedAt', label: 'Updated At', type: 'date' },
+                ];
 
-                setCategoryFieldsCache(prev => ({ ...prev, ...allResults }));
-                return allResults;
+                setCategoryFieldsCache(prev => ({ ...prev, [catId]: allFields }));
+                return allFields;
             } catch (err) {
                 console.error('Error fetching fields:', err);
-                return {};
+                return [];
             } finally {
                 delete fieldsFetchPromisesRef.current[promiseKey];
             }
         })();
 
         fieldsFetchPromisesRef.current[promiseKey] = promise;
-        const allResults = await promise;
-        return allResults[catId] || [];
+        return await promise;
     };
 
     // Get chart data from cache
@@ -2497,11 +2492,11 @@ const AnalyticsDashboardPage = () => {
         const catIdForFields = mergedConfig.chartCategory?._id || mergedConfig.chartCategory;
         const excludeAxisFields = ['__v', '_id'];
         const chartFields = catIdForFields
-            ? (categoryFieldsCache[catIdForFields] || []).filter(f => !excludeAxisFields.includes(f))
+            ? (categoryFieldsCache[catIdForFields] || []).filter(f => !excludeAxisFields.includes(f.field))
             : [];
-        const columns = chartFields.map(field => ({
-            value: field,
-            label: formatFieldName(field)
+        const columns = chartFields.map(f => ({
+            value: f.field,
+            label: f.label
         }));
 
         const toISO = (d) => {

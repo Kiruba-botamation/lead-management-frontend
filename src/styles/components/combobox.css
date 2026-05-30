@@ -56,6 +56,27 @@
   cursor:      not-allowed;
 }
 
+.ds-combobox__input--sm {
+  height:    var(--height-input-sm);
+  font-size: var(--text-xs);
+  padding:   0 var(--space-8) 0 var(--space-2-5);
+}
+
+/* Small panel — tighter items to match --sm trigger */
+.ds-combobox__panel--sm {
+  padding: var(--space-0-5) 0;
+}
+
+.ds-combobox__panel--sm .ds-combobox__option {
+  font-size: var(--text-xs);
+  padding:   var(--space-1-5) var(--space-2-5);
+}
+
+.ds-combobox__panel--sm .ds-combobox__section-label {
+  font-size: var(--text-2xs);
+  padding:   var(--space-1) var(--space-2-5) var(--space-0-5);
+}
+
 /* -- Chevron icon ------------------------------------------ */
 .ds-combobox__chevron {
   position:       absolute;
