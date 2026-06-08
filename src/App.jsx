@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { AccountProvider, useAccount } from './context/AccountContext';
 import ProtectedRoute from './ProtectedRoute';
@@ -25,6 +25,7 @@ function AccountDialogWrapper() {
 
 // AppRoutes is a separate component so AccountProvider can use router hooks (useNavigate, useLocation)
 function AppRoutes() {
+    const location = useLocation();
     return (
         <AccountProvider>
             {/* Global Link Account dialog — renders over any page */}
@@ -91,13 +92,13 @@ function AppRoutes() {
                 {/* Default redirect */}
                 <Route
                     path="/"
-                    element={<Navigate to="/leads" replace />}
+                    element={<Navigate to={{ pathname: '/leads', search: location.search }} replace />}
                 />
 
                 {/* Catch-all redirect */}
                 <Route
                     path="*"
-                    element={<Navigate to="/leads" replace />}
+                    element={<Navigate to={{ pathname: '/leads', search: location.search }} replace />}
                 />
             </Routes>
         </AccountProvider>

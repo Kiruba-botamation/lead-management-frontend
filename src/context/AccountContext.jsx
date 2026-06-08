@@ -75,10 +75,10 @@ export const AccountProvider = ({ children }) => {
                 } else {
                     setIsAccountLinked(true);
                     // Resolve active account: URL param → localStorage → first in list
-                    const urlAcctNo = getAcctNoFromUrl(location.search);
-                    const activeNo = resolveActiveAcctNo(location.search);
+                    const urlAcctNo = getAcctNoFromUrl();
+                    const activeNo = resolveActiveAcctNo();
                     const active =
-                        cleaned.find((a) => a.acctNo === activeNo) || cleaned[0];
+                        cleaned.find((a) => String(a.acctNo) === String(activeNo)) || cleaned[0];
 
                     applySelectedAccount(active);
                     // Always update URL if the ?acc= param is missing or doesn't match
