@@ -17,6 +17,7 @@ import {
 import { Dropdown, DropdownItem, DropdownSeparator } from './ui/Dropdown';
 import BrandLogo from './BrandLogo';
 import AccountCombobox from './AccountCombobox';
+import NotificationBell from './NotificationBell';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 
@@ -61,11 +62,13 @@ const IconLogout = () => (
 /* ── Main component ────────────────────────────────────────────────── */
 
 /**
- * @param {string} activePage – one of: 'leads' | 'admin' | 'settings' | ''
+ * @param {string}   activePage    – one of: 'leads' | 'admin' | 'settings' | ''
  * @param {function} onAccountOpen – callback fired when AccountCombobox opens
  *                                   (so sibling dropdowns can close)
+ * @param {number}   firedCount    – unread fired-reminder count for the bell badge
+ * @param {function} setFiredCount – setter from useReminderStream to reset the badge
  */
-export default function AppNavbar({ activePage = '', onAccountOpen }) {
+export default function AppNavbar({ activePage = '', onAccountOpen, firedCount = 0, setFiredCount }) {
     const navigate = useNavigate();
     const { user, userDetails, logout } = useAuth();
     const {
@@ -176,8 +179,10 @@ export default function AppNavbar({ activePage = '', onAccountOpen }) {
                 </HeaderNav>
             </HeaderStart>
 
-            {/* ── Right: account switcher + user menu ─────────────── */}
+            {/* ── Right: notification bell + account switcher + user menu ── */}
             <HeaderEnd>
+                <NotificationBell firedCount={firedCount} setFiredCount={setFiredCount} />
+
                 <AccountCombobox
                     accounts={accounts}
                     acctNo={acctNo}

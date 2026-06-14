@@ -17,14 +17,19 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
+import { useAuth } from '../context/AuthContext';
 import { Combobox } from './ui/Combobox';
 import { useNotifications } from './Notifications';
+import { useReminderStream } from '../hooks/useReminderStream';
 import LoadingMask from './LoadingMask';
 import DeleteConfirmation from './DeleteConfirmation';
 import Tooltip from './Tooltip';
 import AppNavbar from './AppNavbar';
+import LeadActivityPanel from './LeadActivityPanel';
 import Button from './ui/Button';
 import { Dropdown, DropdownItem } from './ui/Dropdown';
+import { notesApi }     from '../api/notesApi';
+import { remindersApi } from '../api/remindersApi';
 import {
     DndContext,
     DragOverlay,
@@ -479,8 +484,18 @@ const FormFieldInput = ({ type, value, onChange, disabled }) => {
 const LeadsGrid = () => {
     const navigate                             = useNavigate();
     const location                             = useLocation();
-    const { showSuccess, showError, NotificationComponent } = useNotifications();
+    const { showSuccess, showError, showWarning, showReminder, NotificationComponent } = useNotifications();
     const { acctNo, acctId, isAccountLinked, accountsLoaded, accountsLoading, setIsLinkDialogOpen } = useAccount();
+    const { userDetails, adminId, user: rawUser } = useAuth();
+
+    // ── Current admin identity ────────────────────────────────────────────────
+    // adminId is account_admins._id resolved by AuthContext on login/reload.
+    // Falls back to localStorage in case context hasn't resolved yet (e.g. first render).
+    const currentAdminId = adminId || localStorage.getItem('adminId') || '';
+    const adminHasPhone  = Boolean(userDetails?.phone);
+
+    // ── Real-time reminder stream + bell badge ────────────────────────────────
+    const { firedCount, setFiredCount } = useReminderStream({ showReminder, onNewFired: null });
 
     // ── Lead data ─────────────────────────────────────────────────────────────
     const [leads, setLeads]             = useState([]);
@@ -548,6 +563,14 @@ const LeadsGrid = () => {
     const [deleteLeadId,      setDeleteLeadId]      = useState(null);
     const [isDeleteOpen,      setIsDeleteOpen]       = useState(false);
 
+    // ── Activity panel (Notes / Reminders) ───────────────────────────────────
+    const [activityLead,    setActivityLead]    = useState(null);
+    const [activityTab,     setActivityTab]     = useState('notes');
+
+    // ── Per-lead activity counts (for grid button highlights) ─────────────────
+    const [noteCounts,      setNoteCounts]      = useState({}); // { [leadId]: number }
+    const [reminderCounts,  setReminderCounts]  = useState({}); // { [leadId]: number }
+
 
     // ── Click-outside: close column selector ─────────────────────────────────
     useEffect(() => {
@@ -562,11 +585,11 @@ const LeadsGrid = () => {
 
     // ── Responsive: hide grid when edit form open on small screens ────────────
     useEffect(() => {
-        const check = () => setIsGridVisible(window.innerWidth > 768 ? true : !isEditFormVisible);
+        const check = () => setIsGridVisible(window.innerWidth > 768 ? true : !isEditFormVisible && !activityLead);
         check();
         window.addEventListener('resize', check);
         return () => window.removeEventListener('resize', check);
-    }, [isEditFormVisible]);
+    }, [isEditFormVisible, activityLead]);
 
     // ── CALL 1: Fetch category list ───────────────────────────────────────────
     const fetchCategories = useCallback(async () => {
@@ -682,8 +705,23 @@ const LeadsGrid = () => {
             };
 
             const res = await api.get('/api/ui/leads', { params });
-            setLeads(res.data.data || []);
+            const newLeads = res.data.data || [];
+            setLeads(newLeads);
             setTotalRecords(res.data.pagination?.total || 0);
+            // Fetch per-lead activity counts (non-blocking — silent on error)
+            if (newLeads.length && acctId) {
+                const leadIds = newLeads.map(l => l._id);
+                Promise.allSettled([
+                    notesApi.batchCounts(leadIds, acctId),
+                    remindersApi.batchCounts(leadIds, acctId),
+                ]).then(([noteRes, reminderRes]) => {
+                    if (noteRes.status === 'fulfilled')     setNoteCounts(noteRes.value.data?.data || {});
+                    if (reminderRes.status === 'fulfilled') setReminderCounts(reminderRes.value.data?.data || {});
+                });
+            } else {
+                setNoteCounts({});
+                setReminderCounts({});
+            }
             setTotalPages(res.data.pagination?.pages  || 1);
             setCurrentPage(res.data.pagination?.page  || 1);
         } catch (err) {
@@ -695,6 +733,35 @@ const LeadsGrid = () => {
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
+    // ── Deep-link: open a specific lead's activity panel via URL params ───────
+    // Triggered by push notification clicks and bell notification item clicks.
+    // URL format: /leads?openLead={leadId}&tab=reminders|notes
+    useEffect(() => {
+        const params    = new URLSearchParams(location.search);
+        const openLeadId = params.get('openLead');
+        const tabParam   = params.get('tab');
+        if (!openLeadId || !acctId) return;
+
+        // Remove the params from the URL immediately so a refresh doesn't re-trigger
+        const clean = new URLSearchParams(location.search);
+        clean.delete('openLead');
+        clean.delete('tab');
+        navigate(`${location.pathname}${clean.toString() ? '?' + clean.toString() : ''}`, { replace: true });
+
+        // Fetch the lead by ID and open its activity panel
+        api.get(`/api/ui/leads/${openLeadId}`, { params: { acctId } })
+            .then(res => {
+                const lead = res.data?.data;
+                if (lead) {
+                    setActivityLead(lead);
+                    setActivityTab(tabParam === 'notes' ? 'notes' : 'reminders');
+                }
+            })
+            .catch(() => {
+                // Non-fatal — lead may have been deleted or user doesn't have access
+            });
+    }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
     // ── Category change ───────────────────────────────────────────────────────
     const handleCategoryChange = (value) => {
@@ -704,6 +771,8 @@ const LeadsGrid = () => {
         if (value) params.set('categoryId', value); else params.delete('categoryId');
         navigate(`${location.pathname}?${params.toString()}`, { replace: true });
         setAppliedFilters(value ? { categoryId: value } : {});
+        setNoteCounts({});
+        setReminderCounts({});
         setCurrentPage(1);
         // Column defs + filters will reload via the selectedCategory effect
     };
@@ -861,6 +930,8 @@ const LeadsGrid = () => {
 
     // ── Edit lead ─────────────────────────────────────────────────────────────
     const handleEditOpen = (lead) => {
+        // Close activity panel if open (panels are mutually exclusive)
+        setActivityLead(null);
         setEditLead(lead);
         const editableKeys = fields.filter(f => !TRAILING_FIELDS.includes(f));
         const formData     = {};
@@ -900,6 +971,18 @@ const LeadsGrid = () => {
         setIsEditFormVisible(false);
         setEditLead(null);
         setEditFields([]);
+    };
+
+    // ── Activity panel (Notes / Reminders) ───────────────────────────────────
+    const handleActivityOpen = (lead, tab = 'notes') => {
+        setActivityLead(lead);
+        setActivityTab(tab);
+        // Close edit form if open (panels are mutually exclusive)
+        if (isEditFormVisible) {
+            setIsEditFormVisible(false);
+            setEditLead(null);
+            setEditFields([]);
+        }
     };
 
 
@@ -1024,7 +1107,7 @@ const LeadsGrid = () => {
         <div className="h-[100dvh] w-[100dvw] flex flex-col bg-gray-50 overflow-hidden relative">
             <LoadingMask loading={isExporting} title="Exporting..." message="Please wait while we export your leads to Excel" />
             <NotificationComponent />
-            <AppNavbar activePage="leads" />
+            <AppNavbar activePage="leads" firedCount={firedCount} setFiredCount={setFiredCount} />
 
             <div className="flex-1 overflow-hidden flex flex-col px-3 sm:px-4 py-3 relative">
 
@@ -1219,11 +1302,11 @@ const LeadsGrid = () => {
                         </div>
 
                         {/* ── Split panel: Table + Edit form ──────────────── */}
-                        <div className="flex flex-col sm:flex-row gap-4 transition-all duration-300 flex-1 min-h-0 w-full">
+                        <div className="flex flex-col sm:flex-row gap-4 transition-all duration-300 flex-1 min-h-0 w-full" style={{ alignItems: 'stretch' }}>
 
                             {/* LEFT — Table */}
                             {isGridVisible && (
-                                <div className={`transition-all duration-300 flex flex-col min-h-0 h-full ${isEditFormVisible ? 'w-full sm:w-[calc(66.666%-0.5rem)]' : 'w-full'}`}>
+                                <div className={`transition-all duration-300 flex flex-col min-h-0 ${(isEditFormVisible || activityLead) ? 'w-full sm:w-[calc(66.666%-0.5rem)]' : 'w-full'}`}>
                                     <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white rounded-lg shadow-2xl border border-gray-200 animate-scale-in">
                                         {error && (
                                             <div className="bg-indigo-50 border-l-4 border-indigo-500 text-indigo-900 px-3 py-2 m-3 rounded-lg flex items-center justify-between gap-2">
@@ -1262,7 +1345,7 @@ const LeadsGrid = () => {
                                                                         />
                                                                     );
                                                                 })}
-                                                                <th className="px-3 py-2.5 text-center w-20 align-bottom">
+                                                                 <th className="px-3 py-2.5 text-center w-36 align-bottom">
                                                                     <div className="flex items-center justify-center gap-1 mb-1.5">
                                                                         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Actions</span>
                                                                     </div>
@@ -1311,10 +1394,30 @@ const LeadsGrid = () => {
                                                             <tr key={lead._id} className="hover:bg-gray-50 transition-all duration-200" style={{ animationDelay: `${idx * 50}ms` }}>
                                                                 {displayFields.map(field => renderCell(field, lead))}
                                                                 <td className="px-3 py-2 whitespace-nowrap text-center">
-                                                                    <div className="flex items-center justify-center gap-1.5">
+                                                                     <div className="flex items-center justify-center gap-1.5">
                                                                         <Tooltip content="Edit lead" placement="top">
                                                                             <button onClick={() => handleEditOpen(lead)} className="group relative w-6 h-6 flex items-center justify-center bg-transparent rounded-md hover:bg-blue-50 transition-all duration-200 hover:scale-110 border border-gray-300 hover:border-blue-300 focus:ring-1 focus:ring-blue-300">
                                                                                 <svg className="w-3.5 h-3.5 text-gray-400 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                                            </button>
+                                                                        </Tooltip>
+                                                                        <Tooltip content="Notes" placement="top">
+                                                                            <button
+                                                                                onClick={() => handleActivityOpen(lead, 'notes')}
+                                                                                className={`group relative w-6 h-6 flex items-center justify-center bg-transparent rounded-md transition-all duration-200 hover:scale-110 border focus:ring-1 focus:ring-indigo-300 ${activityLead?._id === lead._id && activityTab === 'notes' ? 'bg-indigo-100 border-indigo-400' : noteCounts[lead._id] > 0 ? 'bg-indigo-50 border-indigo-300' : 'border-gray-300 hover:bg-indigo-50 hover:border-indigo-300'}`}
+                                                                            >
+                                                                                <svg className={`w-3.5 h-3.5 transition-colors ${activityLead?._id === lead._id && activityTab === 'notes' ? 'text-indigo-600' : noteCounts[lead._id] > 0 ? 'text-indigo-400' : 'text-gray-400 group-hover:text-indigo-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                                                </svg>
+                                                                            </button>
+                                                                        </Tooltip>
+                                                                        <Tooltip content="Reminders" placement="top">
+                                                                            <button
+                                                                                onClick={() => handleActivityOpen(lead, 'reminders')}
+                                                                                className={`group relative w-6 h-6 flex items-center justify-center bg-transparent rounded-md transition-all duration-200 hover:scale-110 border focus:ring-1 focus:ring-amber-300 ${activityLead?._id === lead._id && activityTab === 'reminders' ? 'bg-amber-100 border-amber-400' : reminderCounts[lead._id] > 0 ? 'bg-amber-50 border-amber-300' : 'border-gray-300 hover:bg-amber-50 hover:border-amber-300'}`}
+                                                                            >
+                                                                                <svg className={`w-3.5 h-3.5 transition-colors ${activityLead?._id === lead._id && activityTab === 'reminders' ? 'text-amber-600' : reminderCounts[lead._id] > 0 ? 'text-amber-400' : 'text-gray-400 group-hover:text-amber-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                                                                </svg>
                                                                             </button>
                                                                         </Tooltip>
                                                                         <Tooltip content="Delete lead" placement="top">
@@ -1376,6 +1479,22 @@ const LeadsGrid = () => {
                                     onCancel={cancelEdit}
                                     isSaving={isSaving}
                                 />
+                            )}
+
+                            {/* RIGHT — Notes / Reminders activity panel */}
+                            {activityLead && (
+                                <div className="w-full sm:w-[calc(33.333%-0.5rem)] flex flex-col min-h-0">
+                                    <LeadActivityPanel
+                                        lead={activityLead}
+                                        leadName={displayFields[0] ? String(activityLead[displayFields[0]] || '').slice(0, 60) || 'Lead' : 'Lead'}
+                                        initialTab={activityTab}
+                                        currentAdminId={currentAdminId}
+                                        currentUser={userDetails || (rawUser?.name ? { name: rawUser.name, profileImageUrl: rawUser.profileImageUrl || '' } : null)}
+                                        adminHasPhone={adminHasPhone}
+                                        onClose={() => setActivityLead(null)}
+                                        onError={showError}
+                                    />
+                                </div>
                             )}
                         </div>
                     </div>

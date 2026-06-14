@@ -11,6 +11,7 @@
 @import './styles/components/grid.css';
 @import './styles/components/radio.css';
 @import './styles/components/combobox.css';
+@import './styles/components/activity-panel.css';
 
 @tailwind base;
 @tailwind components;

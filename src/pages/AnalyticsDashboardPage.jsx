@@ -1408,9 +1408,9 @@ const AnalyticsDashboardPage = () => {
                     return;
                 }
 
-                // Helper: find admin by Botamation adminId (canonical key for AnalyticsSchema)
+                // Helper: find admin by Botamation chatbotAdminId (canonical key for AnalyticsSchema)
                 const findByPlatformId = (id) => id
-                    ? list.find(a => String(a.adminId || a.id || a._id || '') === String(id))
+                    ? list.find(a => String(a.chatbotAdminId || a.adminId || a.id || a._id || '') === String(id))
                     : null;
 
                 // Match the current user's admin record by email
@@ -1419,7 +1419,7 @@ const AnalyticsDashboardPage = () => {
                 );
 
                 if (currentUserAdmin) {
-                    const platformAdminId = String(currentUserAdmin.adminId || currentUserAdmin.id || currentUserAdmin._id || '');
+                    const platformAdminId = String(currentUserAdmin.chatbotAdminId || currentUserAdmin.adminId || currentUserAdmin.id || currentUserAdmin._id || '');
                     if (platformAdminId) {
                         localStorage.setItem('currentUserAdmin', platformAdminId);
                     }
@@ -1445,11 +1445,11 @@ const AnalyticsDashboardPage = () => {
 
                 setViewAsAdmin(adminToSelect);
 
-                // Set viewingAs to the Botamation adminId — this is the ONLY trigger for chart loading.
+                // Set viewingAs to the Botamation chatbotAdminId — this is the ONLY trigger for chart loading.
                 // The chart-loading effect [acctId, viewingAs] will fire next and:
                 //   - load from localStorage if a schema exists there (no backend call), or
                 //   - call handleSchemaSync (backend) if no localStorage schema exists.
-                const viewingAsId = String(adminToSelect.adminId || adminToSelect.id || adminToSelect._id || '');
+                const viewingAsId = String(adminToSelect.chatbotAdminId || adminToSelect.adminId || adminToSelect.id || adminToSelect._id || '');
                 if (viewingAsId) {
                     setViewingAs(viewingAsId);
                 }

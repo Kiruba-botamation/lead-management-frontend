@@ -15,6 +15,7 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);      // Auth check in progress
     const [authenticated, setAuthenticated] = useState(false); // Is session valid?
     const [adminViewActive, setAdminViewActive] = useState(false); // True when viewing as an admin
+    const [adminId, setAdminId] = useState(null);      // account_admins._id for the logged-in user
 
     // Prevents duplicate checks in React StrictMode
     const authCheckedRef = useRef(false);
@@ -44,6 +45,31 @@ export const AuthProvider = ({ children }) => {
                 setAuthenticated(true);
                 setUser(rawUser);
                 logAuthEvent('Auth check passed', { userId: userData.userId });
+
+                // ── Resolve account_admins._id by matching logged-in user's email ──
+                // Done on every login and page reload so adminId is always fresh.
+                // This _id is stored as adminId in lead notes and lead reminders.
+                if (userData.acctId && userData.email) {
+                    try {
+                        const adminsRes = await api.get('/api/ui/admins/list', {
+                            params: { acctId: userData.acctId, limit: 200 }
+                        });
+                        const adminsData = adminsRes.data;
+                        const adminList = Array.isArray(adminsData)
+                            ? adminsData
+                            : (adminsData.admins || adminsData.data || []);
+                        const userEmail = userData.email.trim().toLowerCase();
+                        const matchedAdmin = adminList.find(
+                            a => (a.email || '').trim().toLowerCase() === userEmail
+                        );
+                        if (matchedAdmin?._id) {
+                            localStorage.setItem('adminId', matchedAdmin._id);
+                            setAdminId(matchedAdmin._id);
+                        }
+                    } catch (adminErr) {
+                        console.warn('[SSO] Could not resolve account admin id:', adminErr.message);
+                    }
+                }
 
                 // ── Optional: Fetch full user profile from auth backend ──────
                 if (userData.userId) {
@@ -99,6 +125,7 @@ export const AuthProvider = ({ children }) => {
         setAuthenticated(false);
         setUser(null);
         setUserDetails(null);
+        setAdminId(null);
 
         // 2. Tell the backend to clear the server-side cookie
         try {
@@ -126,6 +153,8 @@ export const AuthProvider = ({ children }) => {
             setUser,
             userDetails,
             setUserDetails,
+            adminId,
+            setAdminId,
             adminViewActive,
             setAdminViewActive,
             authenticated,

@@ -1,0 +1,667 @@
+/* ============================================================
+   Activity Panel — Notes & Reminders Side Drawer
+   ============================================================ */
+
+.activity-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;           /* fill the wrapper column */
+    min-height: 0;     /* allow shrinking so body can scroll */
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-2xl);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+    animation: panel-slide-in var(--duration-slow) var(--ease-spring) both;
+}
+
+@keyframes panel-slide-in {
+    from { opacity: 0; transform: translateX(24px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Panel header ────────────────────────────────────────────── */
+.activity-panel__header {
+    flex-shrink: 0;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.activity-panel__title {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+.activity-panel__subtitle {
+    font-size: var(--text-2xs);
+    color: var(--color-text-subtle);
+    margin-top: 1px;
+}
+
+.activity-panel__close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-subtle);
+    transition: background var(--transition-fast), color var(--transition-fast);
+    flex-shrink: 0;
+}
+.activity-panel__close-btn:hover {
+    background: var(--color-bg-subtle);
+    color: var(--color-text);
+}
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.activity-panel__tabs {
+    flex-shrink: 0;
+    display: flex;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+    background: var(--color-surface);
+}
+
+.activity-panel__tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1-5);
+    padding: var(--space-2-5) var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-subtle);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+    margin-bottom: -1px;
+}
+
+.activity-panel__tab:hover {
+    color: var(--color-text);
+    background: var(--color-bg-subtle);
+}
+
+.activity-panel__tab--active {
+    color: var(--color-primary-600);
+    border-bottom-color: var(--color-primary-600);
+    font-weight: var(--font-semibold);
+}
+
+.activity-panel__tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.25rem;
+    border-radius: var(--radius-full);
+    font-size: 9px;
+    font-weight: var(--font-bold);
+    background: var(--color-primary-100);
+    color: var(--color-primary-700);
+    line-height: 1;
+}
+
+.activity-panel__tab--active .activity-panel__tab-badge {
+    background: var(--color-primary-600);
+    color: var(--color-white);
+}
+
+/* ── Scrollable body ─────────────────────────────────────────── */
+.activity-panel__body {
+    flex: 1 1 0;      /* 0 basis forces flex to respect parent height */
+    min-height: 0;    /* critical — allows flex child to shrink and scroll */
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-gray-200) transparent;
+}
+
+.activity-panel__body::-webkit-scrollbar { width: 4px; }
+.activity-panel__body::-webkit-scrollbar-track { background: transparent; }
+.activity-panel__body::-webkit-scrollbar-thumb { background: var(--color-gray-200); border-radius: var(--radius-full); }
+
+/* ── Note card ───────────────────────────────────────────────── */
+.note-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3);
+    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+    position: relative;
+    animation: card-fade-in var(--duration-normal) var(--ease-out) both;
+}
+
+@keyframes card-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.note-card:hover {
+    border-color: var(--color-primary-200);
+    box-shadow: var(--shadow-sm);
+}
+
+.note-card__admin-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+.note-card__avatar {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: var(--radius-full);
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.note-card__avatar-fallback {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: var(--radius-full);
+    background: var(--gradient-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-2xs);
+    font-weight: var(--font-bold);
+    color: var(--color-white);
+    flex-shrink: 0;
+}
+
+.note-card__admin-name {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.note-card__time {
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.note-card__description {
+    font-size: var(--text-xs);
+    color: var(--color-text);
+    line-height: var(--leading-relaxed);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.note-card__actions {
+    display: flex;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    justify-content: flex-end;
+}
+
+.note-card__action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    transition: all var(--transition-fast);
+}
+
+.note-card__action-btn:hover {
+    transform: scale(1.1);
+}
+
+.note-card__action-btn--edit:hover {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    color: #2563eb;
+}
+
+.note-card__action-btn--delete:hover {
+    background: var(--color-danger-50);
+    border-color: var(--color-danger-300);
+    color: var(--color-danger-500);
+}
+
+/* ── Note edit inline ────────────────────────────────────────── */
+.note-card__edit-area {
+    margin-top: var(--space-2);
+}
+
+/* ── Add note form ───────────────────────────────────────────── */
+.add-note-form {
+    background: var(--color-bg-subtle);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.add-note-form:focus-within {
+    border-color: var(--color-primary-400);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.10);
+    background: var(--color-surface);
+}
+
+.add-note-form__textarea {
+    width: 100%;
+    min-height: 72px;
+    padding: var(--space-2) var(--space-2-5);
+    font-size: var(--text-xs);
+    font-family: var(--font-sans);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text);
+    background: transparent;
+    border: none;
+    resize: vertical;
+    outline: none;
+}
+
+.add-note-form__textarea::placeholder {
+    color: var(--color-text-muted);
+}
+
+.add-note-form__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--color-border);
+}
+
+/* ── Empty state ─────────────────────────────────────────────── */
+.activity-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-8) var(--space-4);
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
+.activity-empty__icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    opacity: 0.35;
+}
+
+.activity-empty__text {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+}
+
+.activity-empty__subtext {
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+}
+
+/* ── Reminder card ───────────────────────────────────────────── */
+.reminder-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    /* No overflow:hidden here — it was clipping the channel badge row.
+       Border-radius on child elements is handled per-element instead. */
+    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+    animation: card-fade-in var(--duration-normal) var(--ease-out) both;
+}
+
+.reminder-card:hover {
+    border-color: var(--color-primary-200);
+    box-shadow: var(--shadow-sm);
+}
+
+.reminder-card--sent {
+    opacity: 0.65;
+}
+
+.reminder-card__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2-5) var(--space-3);
+    background: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.reminder-card__time-badge {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-primary-700);
+    flex: 1;
+    min-width: 0;
+}
+
+.reminder-card__time-badge--sent {
+    color: var(--color-success-600);
+}
+
+.reminder-card__body {
+    padding: var(--space-3);
+}
+
+.reminder-card__title {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    margin-bottom: var(--space-1);
+}
+
+.reminder-card__description {
+    font-size: var(--text-xs);
+    color: var(--color-gray-600);
+    line-height: var(--leading-relaxed);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.reminder-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1-5);
+    margin-top: var(--space-2-5);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--color-border);
+}
+
+.reminder-card__pre-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px var(--space-2);
+    background: var(--color-secondary-50);
+    color: var(--color-secondary-700);
+    border-radius: var(--radius-full);
+    font-size: 10px;
+    font-weight: var(--font-medium);
+    border: 1px solid var(--color-secondary-200);
+}
+
+.reminder-card__channel-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px var(--space-1-5);
+    background: var(--color-gray-100);
+    color: var(--color-gray-600);
+    border-radius: var(--radius-full);
+    font-size: 10px;
+    font-weight: var(--font-medium);
+    border: 1px solid var(--color-gray-200);
+}
+
+.reminder-card__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-subtle);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* ── Add reminder form ───────────────────────────────────────── */
+.add-reminder-form {
+    background: var(--color-surface);
+    border: 1px solid var(--color-primary-200);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    animation: card-fade-in var(--duration-normal) var(--ease-out) both;
+}
+
+.add-reminder-form__header {
+    padding: var(--space-2-5) var(--space-3);
+    background: linear-gradient(to right, var(--color-primary-50), var(--color-secondary-50));
+    border-bottom: 1px solid var(--color-primary-100);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-primary-700);
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+}
+
+.add-reminder-form__body {
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2-5);
+}
+
+.add-reminder-form__label {
+    display: block;
+    font-size: var(--text-2xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-subtle);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    margin-bottom: var(--space-1);
+}
+
+.add-reminder-form__input {
+    width: 100%;
+    padding: var(--space-1-5) var(--space-2-5);
+    font-size: var(--text-xs);
+    font-family: var(--font-sans);
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.add-reminder-form__input:focus {
+    border-color: var(--color-primary-400);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.10);
+}
+
+/* ── Date / time picker — custom styled wrapper ─────────────────────────────── */
+
+/* Wrapper provides the styled border/bg and our own SVG icon */
+.add-reminder-form__datetime-wrap {
+    position:      relative;
+    display:       flex;
+    align-items:   center;
+}
+
+/* Our custom SVG icon — sits on the left inside the wrapper */
+.add-reminder-form__datetime-icon {
+    position:   absolute;
+    left:       8px;
+    width:      14px;
+    height:     14px;
+    color:      var(--color-primary-500);
+    pointer-events: none;
+    flex-shrink: 0;
+    z-index:    1;
+}
+
+/* The native input: full-width, padded to make room for our icon;
+   browser's own icon is hidden via appearance tricks */
+.add-reminder-form__datetime-input {
+    padding-left: 28px !important;
+    cursor: pointer;
+    width: 100%;
+}
+
+/* Hide the browser-painted calendar/clock icon so ours shows instead */
+.add-reminder-form__datetime-input::-webkit-calendar-picker-indicator {
+    opacity:    0;
+    position:   absolute;
+    right:      0;
+    width:      100%;
+    height:     100%;
+    cursor:     pointer;
+}
+
+.add-reminder-form__datetime-input::-webkit-inner-spin-button,
+.add-reminder-form__datetime-input::-webkit-clear-button {
+    display: none;
+}
+
+.add-reminder-form__textarea {
+    width: 100%;
+    padding: var(--space-1-5) var(--space-2-5);
+    font-size: var(--text-xs);
+    font-family: var(--font-sans);
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    outline: none;
+    resize: vertical;
+    min-height: 64px;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.add-reminder-form__textarea:focus {
+    border-color: var(--color-primary-400);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.10);
+}
+
+.add-reminder-form__select {
+    padding: var(--space-1-5) var(--space-2-5);
+    font-size: var(--text-xs);
+    font-family: var(--font-sans);
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    outline: none;
+    cursor: pointer;
+    transition: border-color var(--transition-fast);
+    min-width: 90px;
+}
+
+.add-reminder-form__select:focus {
+    border-color: var(--color-primary-400);
+}
+
+.add-reminder-form__channels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.add-reminder-form__channel-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: var(--text-2xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-subtle);
+    background: var(--color-surface);
+    transition: all var(--transition-fast);
+    user-select: none;
+}
+
+.add-reminder-form__channel-option:hover {
+    border-color: var(--color-primary-300);
+    color: var(--color-primary-600);
+    background: var(--color-primary-50);
+}
+
+.add-reminder-form__channel-option--active {
+    border-color: var(--color-primary-500);
+    color: var(--color-primary-700);
+    background: var(--color-primary-50);
+}
+
+.add-reminder-form__channel-option--disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.add-reminder-form__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-2-5) var(--space-3);
+    background: var(--color-bg-subtle);
+    border-top: 1px solid var(--color-border);
+}
+
+.add-reminder-form__toggle-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+}
+
+.add-reminder-form__toggle {
+    position: relative;
+    width: 2rem;
+    height: 1.125rem;
+    background: var(--color-gray-300);
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+    transition: background var(--transition-fast);
+    cursor: pointer;
+}
+
+.add-reminder-form__toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 0.875rem;
+    height: 0.875rem;
+    background: var(--color-white);
+    border-radius: var(--radius-full);
+    transition: transform var(--transition-fast);
+    box-shadow: var(--shadow-xs);
+}
+
+.add-reminder-form__toggle--on {
+    background: var(--color-primary-500);
+}
+
+.add-reminder-form__toggle--on::after {
+    transform: translateX(0.875rem);
+}

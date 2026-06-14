@@ -2,7 +2,7 @@
 import api from '../../api/axiosConfig';
 import Tooltip from '../../components/Tooltip';
 
-const EXCLUDE_KEYS = ['__v', '_id', 'id', 'adminId', 'acctNo', 'acctno'];
+const EXCLUDE_KEYS = ['__v', '_id', 'id', 'chatbotAdminId', 'acctNo', 'acctno'];
 const COLUMN_ORDER = ['firstName', 'lastName', 'phone', 'email', 'createdAt', 'updatedAt'];
 const IMAGE_KEYS = ['profileImage', 'profileImageUrl', 'avatar', 'photo', 'image'];
 const NAME_KEYS = ['firstName', 'firstname', 'name', 'fullName', 'fullname', 'username', 'displayName', 'displayname'];
