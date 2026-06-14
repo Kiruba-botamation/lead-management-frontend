@@ -17,7 +17,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, resolveChatbotAdmin } from '../context/AuthContext';
 import { Combobox } from './ui/Combobox';
 import { useNotifications } from './Notifications';
 import { useReminderStream } from '../hooks/useReminderStream';
@@ -297,14 +297,234 @@ const isFilterActive = (filterDef) => {
     return false;
 };
 
+/** Human-readable summary of a filter value for the active-filters list */
+const filterSummary = (filterDef) => {
+    if (!filterDef) return '';
+    const { type, value, op, min, max, from, to } = filterDef;
+    if (type === 'text')    return `"${value}"`;
+    if (type === 'boolean') return value === 'true' ? 'Yes' : 'No';
+    if (type === 'date') {
+        if (from && to)  return `${from} → ${to}`;
+        if (from)        return `from ${from}`;
+        if (to)          return `to ${to}`;
+    }
+    if (type === 'number') {
+        const opLabel = NUM_OPS.find(o => o.value === op)?.label || op;
+        if (op === 'between') return `${min} – ${max}`;
+        return `${opLabel} ${value}`;
+    }
+    return '';
+};
+
+
+// ── Filter Popup ──────────────────────────────────────────────────────────────
+
+const FilterPopup = ({
+    fields, columnDefMap,
+    filters, onFilterChange,
+    onApply, onClearAll, onClose,
+}) => {
+    const [selectedField, setSelectedField] = React.useState(() => {
+        // Default to the first field that already has an active filter, or just the first field
+        const activeField = fields.find(f => isFilterActive(filters[f]));
+        return activeField || fields[0] || '';
+    });
+
+    const colDef      = columnDefMap.get(selectedField);
+    const activeRows  = fields.filter(f => isFilterActive(filters[f]));
+
+    // onApply and onClearAll already close the popup (handled by parent)
+    const handleApplyAndClose = () => { onApply(); };
+
+    const handleClearAllAndClose = () => { onClearAll(); };
+
+    const removeFilter = (field) => {
+        onFilterChange(field, null);
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+
+            {/* Panel */}
+            <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-lg animate-fade-in flex flex-col max-h-[90vh]">
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 bg-indigo-100 rounded-lg flex items-center justify-center">
+                            <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h2 className="text-sm font-bold text-gray-900">Filter Leads</h2>
+                            <p className="text-[10px] text-gray-400 leading-none mt-0.5">Select a column and set your filter criteria</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+                    {/* ── Column selector + filter input ── */}
+                    <div className="space-y-3">
+                        <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                            Select Column
+                        </label>
+                        <select
+                            value={selectedField}
+                            onChange={e => setSelectedField(e.target.value)}
+                            className="w-full px-3 py-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition-all cursor-pointer"
+                        >
+                            {fields.map(f => {
+                                const def   = columnDefMap.get(f);
+                                const lbl   = def?.label || SYSTEM_LABELS[f] || f;
+                                const hasFilter = isFilterActive(filters[f]);
+                                return (
+                                    <option key={f} value={f}>
+                                        {lbl}{hasFilter ? ' ●' : ''}
+                                    </option>
+                                );
+                            })}
+                        </select>
+
+                        {/* Type badge */}
+                        {colDef && (
+                            <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-[10px] font-semibold text-indigo-600 uppercase tracking-wider">
+                                    {colDef.type || 'text'}
+                                </span>
+                                {isFilterActive(filters[selectedField]) && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-[10px] font-semibold text-emerald-600">
+                                        Filter active
+                                    </span>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Filter input for selected column */}
+                        {selectedField && (
+                            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                    {columnDefMap.get(selectedField)?.label || SYSTEM_LABELS[selectedField] || selectedField}
+                                </p>
+                                <FilterInput
+                                    colDef={colDef}
+                                    value={filters[selectedField]}
+                                    onChange={(v) => onFilterChange(selectedField, v)}
+                                    onApply={() => {}}
+                                />
+                                {isFilterActive(filters[selectedField]) && (
+                                    <button
+                                        onClick={() => removeFilter(selectedField)}
+                                        className="mt-2 text-[10px] text-red-500 hover:text-red-700 font-medium transition-colors"
+                                    >
+                                        Remove this filter
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ── Active filters list ── */}
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                                Active Filters
+                                {activeRows.length > 0 && (
+                                    <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold">
+                                        {activeRows.length}
+                                    </span>
+                                )}
+                            </label>
+                        </div>
+
+                        {activeRows.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-5 rounded-xl border border-dashed border-gray-200 text-center">
+                                <svg className="w-6 h-6 text-gray-300 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+                                </svg>
+                                <p className="text-[11px] text-gray-400 font-medium">No filters added yet</p>
+                                <p className="text-[10px] text-gray-300 mt-0.5">Select a column above and fill in the filter criteria</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-1.5">
+                                {activeRows.map(f => {
+                                    const def   = columnDefMap.get(f);
+                                    const lbl   = def?.label || SYSTEM_LABELS[f] || f;
+                                    const summary = filterSummary(filters[f]);
+                                    const isSelected = f === selectedField;
+                                    return (
+                                        <div
+                                            key={f}
+                                            onClick={() => setSelectedField(f)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-100 hover:bg-gray-100'}`}
+                                        >
+                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${isSelected ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                                                {def?.type || 'text'}
+                                            </span>
+                                            <span className="text-[11px] font-semibold text-gray-700 shrink-0">{lbl}</span>
+                                            <span className="text-[11px] text-gray-400 truncate flex-1">{summary}</span>
+                                            <button
+                                                onClick={e => { e.stopPropagation(); removeFilter(f); }}
+                                                className="w-5 h-5 flex items-center justify-center rounded-md hover:bg-red-100 text-gray-300 hover:text-red-500 transition-colors shrink-0"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center gap-2 px-5 py-3 border-t border-gray-100 shrink-0 bg-gray-50 rounded-b-2xl">
+                    <button
+                        onClick={handleClearAllAndClose}
+                        disabled={activeRows.length === 0}
+                        className="px-3 py-1.5 text-[11px] font-semibold text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        Clear All
+                    </button>
+                    <div className="flex-1" />
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-1.5 text-[11px] font-semibold text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={handleApplyAndClose}
+                        className="px-4 py-1.5 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm"
+                    >
+                        Apply{activeRows.length > 0 ? ` (${activeRows.length})` : ''}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 // ── Sortable column header ────────────────────────────────────────────────────
 
 const SortableColumnHeader = ({
-    field, colDef, label,
+    field, label,
     renderSortIcon, handleSort,
-    filters, onFilterChange, onFilterApply,
-    hasAnyFilter, isDragging,
+    isColFilterActive, isDragging,
     width, onResize,
 }) => {
     const {
@@ -343,12 +563,10 @@ const SortableColumnHeader = ({
         width:      width || undefined,
     };
 
-    const thisFilterActive = isFilterActive(filters[field]);
-
     return (
         <th
             ref={combinedRef} style={style} {...attributes} {...listeners}
-            className={`px-3 py-2.5 relative align-bottom select-none text-center ${isSelfDragging ? '' : 'hover:bg-indigo-50/60 transition-colors'}`}
+            className={`px-3 py-2.5 relative align-middle select-none text-center ${isSelfDragging ? '' : 'hover:bg-indigo-50/60 transition-colors'}`}
         >
             {/* Resize handle */}
             <div
@@ -360,27 +578,18 @@ const SortableColumnHeader = ({
                 <div className="absolute right-0 top-1/4 h-1/2 w-px bg-gray-200 group-hover/resize:bg-indigo-400 transition-colors" />
             </div>
             <div
-                className="flex items-center justify-center group/sort mb-1.5 transition-colors"
+                className="flex items-center justify-center group/sort transition-colors"
                 onClick={() => { if (!isDragging) handleSort(field); }}
             >
                 <div className="relative inline-flex items-center gap-1">
                     <span className="text-slate-300 group-hover/sort:text-slate-400 text-[9px] leading-none mr-0.5 select-none" aria-hidden="true">⠿</span>
-                    <span className={`text-[11px] font-extrabold uppercase tracking-wider group-hover/sort:text-indigo-600 transition-colors ${thisFilterActive ? 'text-indigo-600' : 'text-slate-500'}`}>
+                    <span className={`text-[11px] font-extrabold uppercase tracking-wider group-hover/sort:text-indigo-600 transition-colors ${isColFilterActive ? 'text-indigo-600' : 'text-slate-500'}`}>
                         {label}
                     </span>
                     {renderSortIcon(field)}
-                </div>
-            </div>
-            <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${hasAnyFilter ? 'grid-rows-[1fr]' : 'grid-rows-[0fr] group-hover/header:grid-rows-[1fr] group-focus-within/header:grid-rows-[1fr]'}`}>
-                <div className="overflow-hidden">
-                    <div className="pb-1 pt-0.5 px-0.5">
-                        <FilterInput
-                            colDef={colDef}
-                            value={filters[field]}
-                            onChange={(v) => onFilterChange(field, v)}
-                            onApply={onFilterApply}
-                        />
-                    </div>
+                    {isColFilterActive && (
+                        <span className="ml-0.5 w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" title="Filter active" />
+                    )}
                 </div>
             </div>
         </th>
@@ -486,13 +695,20 @@ const LeadsGrid = () => {
     const location                             = useLocation();
     const { showSuccess, showError, showWarning, showReminder, NotificationComponent } = useNotifications();
     const { acctNo, acctId, isAccountLinked, accountsLoaded, accountsLoading, setIsLinkDialogOpen } = useAccount();
-    const { userDetails, adminId, user: rawUser } = useAuth();
+    const { userDetails, adminId, chatbotAdmin, setChatbotAdmin, setAdminId, user: rawUser } = useAuth();
 
     // ── Current admin identity ────────────────────────────────────────────────
-    // adminId is account_admins._id resolved by AuthContext on login/reload.
-    // Falls back to localStorage in case context hasn't resolved yet (e.g. first render).
     const currentAdminId = adminId || localStorage.getItem('adminId') || '';
     const adminHasPhone  = Boolean(userDetails?.phone);
+
+    // ── Resolve chatbot admin identity whenever acctId changes ────────────────
+    // Covers: page load, account switch, admin list refresh.
+    // acctId no longer lives in the JWT, so we resolve here where acctId is known.
+    const userEmail = rawUser?.email || userDetails?.email || '';
+    useEffect(() => {
+        if (!acctId || !userEmail) return;
+        resolveChatbotAdmin(acctId, userEmail, setChatbotAdmin, setAdminId);
+    }, [acctId, userEmail]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Real-time reminder stream + bell badge ────────────────────────────────
     const { firedCount, setFiredCount } = useReminderStream({ showReminder, onNewFired: null });
@@ -539,6 +755,9 @@ const LeadsGrid = () => {
     const [visibleFields,       setVisibleFields]       = useState(null);
     const [showColumnSelector,  setShowColumnSelector]  = useState(false);
     const columnSelectorRef = useRef(null);
+
+    // ── Filter popup ──────────────────────────────────────────────────────────
+    const [showFilterPopup, setShowFilterPopup] = useState(false);
 
     // ── Column drag state ─────────────────────────────────────────────────────
     const [activeColId, setActiveColId] = useState(null);
@@ -1163,8 +1382,22 @@ const LeadsGrid = () => {
 
                             <div className="w-px h-6 bg-gray-200 mx-1.5" />
 
-                            {/* Group 2: View controls */}
+                            {/* Group 2a: Filter controls */}
                             <div className="flex items-center gap-1.5">
+                                <Tooltip content="Filter columns" placement="top">
+                                    <button
+                                        onClick={() => setShowFilterPopup(true)}
+                                        disabled={fields.length === 0}
+                                        className={`group relative w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-300 hover:scale-110 border focus:ring-1 disabled:opacity-40 disabled:cursor-not-allowed ${activeFilterCount > 0 ? 'bg-indigo-50 border-indigo-400 focus:ring-indigo-300' : 'bg-transparent border-gray-300 hover:bg-indigo-50 hover:border-indigo-400 focus:ring-indigo-300'}`}
+                                    >
+                                        <svg className={`w-4 h-4 transition-colors ${activeFilterCount > 0 ? 'text-indigo-600' : 'text-gray-600 group-hover:text-indigo-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+                                        </svg>
+                                        {activeFilterCount > 0 && (
+                                            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-indigo-600 rounded-full text-white text-[8px] flex items-center justify-center font-bold">{activeFilterCount}</span>
+                                        )}
+                                    </button>
+                                </Tooltip>
                                 <Tooltip content={activeFilterCount > 0 ? `Clear ${activeFilterCount} filter(s)` : 'No active filters'} placement="top">
                                     <button
                                         onClick={clearAllFilters}
@@ -1177,6 +1410,12 @@ const LeadsGrid = () => {
                                         </svg>
                                     </button>
                                 </Tooltip>
+                            </div>
+
+                            <div className="w-px h-6 bg-gray-200 mx-1.5" />
+
+                            {/* Group 2b: Sort controls */}
+                            <div className="flex items-center gap-1.5">
                                 <Tooltip content={sortField ? `Clear sort: ${sortField} (${sortOrder})` : 'No active sort'} placement="top">
                                     <button
                                         onClick={() => { setSortField(''); setSortOrder('asc'); setCurrentPage(1); }}
@@ -1331,31 +1570,19 @@ const LeadsGrid = () => {
                                                                         <SortableColumnHeader
                                                                             key={field}
                                                                             field={field}
-                                                                            colDef={colDef}
                                                                             label={label}
                                                                             renderSortIcon={renderSortIcon}
                                                                             handleSort={handleSort}
-                                                                            filters={filters}
-                                                                            onFilterChange={handleFilterChange}
-                                                                            onFilterApply={handleApplyFilters}
-                                                                            hasAnyFilter={hasAnyFilter}
+                                                                            isColFilterActive={isFilterActive(appliedFilters[field])}
                                                                             isDragging={activeColId !== null}
                                                                             width={colWidths[field]}
                                                                             onResize={handleColResize}
                                                                         />
                                                                     );
                                                                 })}
-                                                                 <th className="px-3 py-2.5 text-center w-36 align-bottom">
-                                                                    <div className="flex items-center justify-center gap-1 mb-1.5">
+                                                                <th className="px-3 py-2.5 text-center w-20 align-middle">
+                                                                    <div className="flex items-center justify-center gap-1">
                                                                         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Actions</span>
-                                                                    </div>
-                                                                    {/* Spacer to align with filter row */}
-                                                                    <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${hasAnyFilter ? 'grid-rows-[1fr]' : 'grid-rows-[0fr] group-hover/header:grid-rows-[1fr]'}`}>
-                                                                        <div className="overflow-hidden">
-                                                                            <div className="pb-1 pt-0.5 px-0.5 opacity-0 pointer-events-none">
-                                                                                <input type="text" className="w-full px-2 py-1 text-[10px]" disabled />
-                                                                            </div>
-                                                                        </div>
                                                                     </div>
                                                                 </th>
                                                             </tr>
@@ -1489,7 +1716,14 @@ const LeadsGrid = () => {
                                         leadName={displayFields[0] ? String(activityLead[displayFields[0]] || '').slice(0, 60) || 'Lead' : 'Lead'}
                                         initialTab={activityTab}
                                         currentAdminId={currentAdminId}
-                                        currentUser={userDetails || (rawUser?.name ? { name: rawUser.name, profileImageUrl: rawUser.profileImageUrl || '' } : null)}
+                                        currentUser={
+                                            // Priority: chatbotAdmin (from account_admins — has firstName, lastName, profileImage)
+                                            // Fallback: userDetails (from auth service profile)
+                                            // Last resort: rawUser (SSO token fields)
+                                            chatbotAdmin
+                                            || userDetails
+                                            || (rawUser?.name ? { name: rawUser.name, profileImageUrl: rawUser.profileImageUrl || '' } : null)
+                                        }
                                         adminHasPhone={adminHasPhone}
                                         onClose={() => setActivityLead(null)}
                                         onError={showError}
@@ -1500,6 +1734,35 @@ const LeadsGrid = () => {
                     </div>
                 )}
             </div>
+
+            {/* Filter popup */}
+            {showFilterPopup && (
+                <FilterPopup
+                    fields={fields}
+                    columnDefMap={columnDefMap}
+                    filters={filters}
+                    onFilterChange={handleFilterChange}
+                    onApply={() => {
+                        handleApplyFilters();
+                        setShowFilterPopup(false);
+                    }}
+                    onClearAll={() => {
+                        clearAllFilters();
+                        setShowFilterPopup(false);
+                    }}
+                    onClose={() => {
+                        // Cancel — discard un-applied staged changes
+                        setFilters(prev => {
+                            const reset = { ...prev };
+                            fields.forEach(f => {
+                                reset[f] = appliedFilters[f] ?? null;
+                            });
+                            return reset;
+                        });
+                        setShowFilterPopup(false);
+                    }}
+                />
+            )}
 
             {/* Delete lead confirmation */}
             <DeleteConfirmation

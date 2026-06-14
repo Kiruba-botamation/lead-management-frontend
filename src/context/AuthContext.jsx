@@ -9,6 +9,70 @@ import {
 
 const AuthContext = createContext(null);
 
+// ── localStorage helpers ──────────────────────────────────────────────────────
+const LS_CHATBOT_ADMIN = 'chatbotAdmin'; // JSON: { name, profileImageUrl, chatbotAdminId }
+const LS_ADMIN_ID      = 'adminId';
+
+export function loadChatbotAdminFromStorage() {
+    try {
+        const raw = localStorage.getItem(LS_CHATBOT_ADMIN);
+        return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+}
+
+function saveChatbotAdminToStorage(obj) {
+    try { localStorage.setItem(LS_CHATBOT_ADMIN, JSON.stringify(obj)); } catch { /* ignore */ }
+}
+
+/**
+ * Fetch the account_admins list for `acctId`, find the record matching
+ * `email`, and persist the chatbot admin identity to localStorage + state.
+ *
+ * Call this on: login, page refresh, account switch, admin list refresh.
+ *
+ * @param {string}   acctId
+ * @param {string}   email           - logged-in user's email
+ * @param {function} setChatbotAdmin - state setter from AuthContext
+ * @param {function} setAdminId      - state setter from AuthContext
+ * @returns {object|null}            - the chatbotAdmin data object, or null
+ */
+export async function resolveChatbotAdmin(acctId, email, setChatbotAdmin, setAdminId) {
+    if (!acctId || !email) return null;
+    try {
+        const res = await api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } });
+        const raw = res.data;
+        const adminList = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
+
+        const userEmail    = email.trim().toLowerCase();
+        const matchedAdmin = adminList.find(
+            a => (a.email || '').trim().toLowerCase() === userEmail
+        );
+
+        if (!matchedAdmin?._id) return null;
+
+        // Persist account_admins._id
+        localStorage.setItem(LS_ADMIN_ID, matchedAdmin._id);
+        setAdminId?.(matchedAdmin._id);
+
+        // Build display name
+        const name = [matchedAdmin.firstName || '', matchedAdmin.lastName || '']
+            .filter(Boolean).join(' ') || matchedAdmin.email || '';
+
+        const data = {
+            name,
+            profileImageUrl: matchedAdmin.profileImage || '',
+            chatbotAdminId:  matchedAdmin.chatbotAdminId || '',
+        };
+
+        saveChatbotAdminToStorage(data);
+        setChatbotAdmin?.(data);
+        return data;
+    } catch (err) {
+        console.warn('[SSO] resolveChatbotAdmin error:', err.message);
+        return null;
+    }
+}
+
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);      // Raw user from SSO token
     const [userDetails, setUserDetails] = useState(null);      // Full user profile from auth DB
@@ -16,6 +80,13 @@ export const AuthProvider = ({ children }) => {
     const [authenticated, setAuthenticated] = useState(false); // Is session valid?
     const [adminViewActive, setAdminViewActive] = useState(false); // True when viewing as an admin
     const [adminId, setAdminId] = useState(null);      // account_admins._id for the logged-in user
+    /**
+     * chatbotAdmin — the account_admins record for the logged-in user.
+     * Persisted to localStorage so it's available instantly on next page load
+     * before the async admins/list fetch completes.
+     * Shape: { name, profileImageUrl, chatbotAdminId }
+     */
+    const [chatbotAdmin, setChatbotAdmin] = useState(() => loadChatbotAdminFromStorage());
 
     // Prevents duplicate checks in React StrictMode
     const authCheckedRef = useRef(false);
@@ -46,30 +117,10 @@ export const AuthProvider = ({ children }) => {
                 setUser(rawUser);
                 logAuthEvent('Auth check passed', { userId: userData.userId });
 
-                // ── Resolve account_admins._id by matching logged-in user's email ──
-                // Done on every login and page reload so adminId is always fresh.
-                // This _id is stored as adminId in lead notes and lead reminders.
-                if (userData.acctId && userData.email) {
-                    try {
-                        const adminsRes = await api.get('/api/ui/admins/list', {
-                            params: { acctId: userData.acctId, limit: 200 }
-                        });
-                        const adminsData = adminsRes.data;
-                        const adminList = Array.isArray(adminsData)
-                            ? adminsData
-                            : (adminsData.admins || adminsData.data || []);
-                        const userEmail = userData.email.trim().toLowerCase();
-                        const matchedAdmin = adminList.find(
-                            a => (a.email || '').trim().toLowerCase() === userEmail
-                        );
-                        if (matchedAdmin?._id) {
-                            localStorage.setItem('adminId', matchedAdmin._id);
-                            setAdminId(matchedAdmin._id);
-                        }
-                    } catch (adminErr) {
-                        console.warn('[SSO] Could not resolve account admin id:', adminErr.message);
-                    }
-                }
+                // NOTE: chatbotAdmin resolution (admins/list lookup) is triggered by
+                // LeadsGrid whenever acctId becomes available or changes. This is because
+                // acctId no longer lives in the JWT — it comes from the account switcher.
+                // On first load, loadChatbotAdminFromStorage() provides instant fallback.
 
                 // ── Optional: Fetch full user profile from auth backend ──────
                 if (userData.userId) {
@@ -126,6 +177,7 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setUserDetails(null);
         setAdminId(null);
+        setChatbotAdmin(null);
 
         // 2. Tell the backend to clear the server-side cookie
         try {
@@ -155,6 +207,8 @@ export const AuthProvider = ({ children }) => {
             setUserDetails,
             adminId,
             setAdminId,
+            chatbotAdmin,    // { name, profileImageUrl, chatbotAdminId } — persisted to localStorage
+            setChatbotAdmin,
             adminViewActive,
             setAdminViewActive,
             authenticated,
