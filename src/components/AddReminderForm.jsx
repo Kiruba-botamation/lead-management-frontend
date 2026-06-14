@@ -251,7 +251,9 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                 preReminderValue:   preEnabled ? Number(preValue) : undefined,
                 preReminderUnit:    preEnabled ? preUnit : undefined,
                 channels:           activeChannels,
-                adminId,
+                // On edit use the record's own adminId (ownership check in backend).
+                // On create use the current user's adminId.
+                adminId:            reminder?.adminId || adminId,
             };
             const res = isEdit
                 ? await remindersApi.update(leadId, reminder._id, data, acctId)

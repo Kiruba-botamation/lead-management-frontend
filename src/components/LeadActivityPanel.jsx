@@ -156,9 +156,9 @@ export default function LeadActivityPanel({
         setNotes(prev => [patched, ...prev]);
     };
 
-    const handleNoteEdit = async (noteId, description) => {
+    const handleNoteEdit = async (noteId, description, adminId) => {
         try {
-            const res = await notesApi.update(leadId, noteId, description, acctId);
+            const res = await notesApi.update(leadId, noteId, description, acctId, adminId);
             const updated = res.data?.data;
             setNotes(prev => prev.map(n => n._id === noteId ? { ...n, description: updated?.description || description } : n));
         } catch (err) {
@@ -166,9 +166,9 @@ export default function LeadActivityPanel({
         }
     };
 
-    const handleNoteDelete = async (noteId) => {
+    const handleNoteDelete = async (noteId, adminId) => {
         try {
-            await notesApi.remove(leadId, noteId, acctId);
+            await notesApi.remove(leadId, noteId, acctId, adminId);
             setNotes(prev => prev.filter(n => n._id !== noteId));
         } catch (err) {
             onError?.(err.response?.data?.message || 'Failed to delete note.');
@@ -195,9 +195,9 @@ export default function LeadActivityPanel({
         setShowAddForm(true);
     };
 
-    const handleReminderDelete = async (reminderId) => {
+    const handleReminderDelete = async (reminderId, adminId) => {
         try {
-            await remindersApi.remove(leadId, reminderId, acctId);
+            await remindersApi.remove(leadId, reminderId, acctId, adminId);
             setReminders(prev => prev.filter(r => r._id !== reminderId));
         } catch (err) {
             onError?.(err.response?.data?.message || 'Failed to delete reminder.');

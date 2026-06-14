@@ -9,11 +9,11 @@ export const remindersApi = {
     /** Create and schedule a new reminder */
     create:   (leadId, data, acctId)             => api.post(BASE(leadId), data,                  { params: { acctId } }),
 
-    /** Update and reschedule a reminder */
+    /** Update and reschedule a reminder (data must include adminId) */
     update:   (leadId, reminderId, data, acctId) => api.put(`${BASE(leadId)}/${reminderId}`, data, { params: { acctId } }),
 
     /** Delete a reminder and cancel its jobs */
-    remove:   (leadId, reminderId, acctId)       => api.delete(`${BASE(leadId)}/${reminderId}`,   { params: { acctId } }),
+    remove:   (leadId, reminderId, acctId, adminId) => api.delete(`${BASE(leadId)}/${reminderId}`, { data: { adminId }, params: { acctId } }),
 
     /** Get fired reminders for the bell inbox (paginated) */
     getFired:     (page = 1, limit = 10, adminId) => api.get('/api/ui/reminders/fired', { params: { page, limit, adminId } }),

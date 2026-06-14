@@ -10,10 +10,10 @@ export const notesApi = {
     create:  (leadId, description, acctId, adminId) => api.post(BASE(leadId), { description, adminId },     { params: { acctId } }),
 
     /** Update a note (creator only) */
-    update:  (leadId, noteId, description, acctId)  => api.put(`${BASE(leadId)}/${noteId}`, { description }, { params: { acctId } }),
+    update:  (leadId, noteId, description, acctId, adminId) => api.put(`${BASE(leadId)}/${noteId}`, { description, adminId }, { params: { acctId } }),
 
     /** Delete a note (creator only) */
-    remove:  (leadId, noteId, acctId)               => api.delete(`${BASE(leadId)}/${noteId}`,              { params: { acctId } }),
+    remove:  (leadId, noteId, acctId, adminId)              => api.delete(`${BASE(leadId)}/${noteId}`, { data: { adminId }, params: { acctId } }),
 
     /** Get note counts for multiple leads (for grid badge highlights) */
     batchCounts: (leadIds, acctId)                  => api.post('/api/ui/activity/notes/batch-counts', { leadIds }, { params: { acctId } }),

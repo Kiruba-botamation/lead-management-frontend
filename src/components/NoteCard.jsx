@@ -52,7 +52,7 @@ export default function NoteCard({ note, currentAdminId, onEdit, onDelete }) {
         if (trimmed === note.description) { setEditing(false); return; }
         setSaving(true);
         try {
-            await onEdit(note._id, trimmed);
+            await onEdit(note._id, trimmed, note.adminId);
             setEditing(false);
         } finally {
             setSaving(false);
@@ -128,7 +128,7 @@ export default function NoteCard({ note, currentAdminId, onEdit, onDelete }) {
                     </button>
                     <button
                         className="note-card__action-btn note-card__action-btn--delete"
-                        onClick={() => onDelete(note._id)}
+                        onClick={() => onDelete(note._id, note.adminId)}
                         title="Delete note"
                     >
                         <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">

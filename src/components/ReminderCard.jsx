@@ -97,7 +97,7 @@ export default function ReminderCard({ reminder, currentAdminId, onEdit, onDelet
                 <div className="reminder-card__footer">
                     <button
                         className="note-card__action-btn note-card__action-btn--edit"
-                        onClick={() => onEdit(reminder)}
+                        onClick={() => onEdit(reminder)}   /* full reminder object passed — adminId is inside */
                         title="Edit reminder"
                     >
                         <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -107,7 +107,7 @@ export default function ReminderCard({ reminder, currentAdminId, onEdit, onDelet
                     </button>
                     <button
                         className="note-card__action-btn note-card__action-btn--delete"
-                        onClick={() => onDelete(reminder._id)}
+                        onClick={() => onDelete(reminder._id, reminder.adminId)}
                         title="Delete reminder"
                     >
                         <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
