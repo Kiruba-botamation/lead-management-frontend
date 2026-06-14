@@ -16,13 +16,13 @@ export const remindersApi = {
     remove:   (leadId, reminderId, acctId)       => api.delete(`${BASE(leadId)}/${reminderId}`,   { params: { acctId } }),
 
     /** Get fired reminders for the bell inbox (paginated) */
-    getFired:     (page = 1, limit = 10)         => api.get('/api/ui/reminders/fired', { params: { page, limit } }),
+    getFired:     (page = 1, limit = 10, adminId) => api.get('/api/ui/reminders/fired', { params: { page, limit, adminId } }),
 
     /** Mark fired reminders as read (pass ids array or omit to mark all) */
-    markRead:     (reminderIds)                  => api.post('/api/ui/reminders/mark-read', { reminderIds }),
+    markRead:     (reminderIds, adminId)           => api.post('/api/ui/reminders/mark-read', { reminderIds, adminId }),
 
     /** Permanently delete a single fired reminder from the bell inbox */
-    dismissFired: (reminderId)                   => api.delete(`/api/ui/reminders/fired/${reminderId}`),
+    dismissFired: (reminderId, adminId)            => api.delete(`/api/ui/reminders/fired/${reminderId}`, { params: { adminId } }),
 
     /** Get pending reminder counts for multiple leads (for grid badge highlights) */
     batchCounts:  (leadIds, acctId)              => api.post('/api/ui/activity/reminders/batch-counts', { leadIds }, { params: { acctId } }),

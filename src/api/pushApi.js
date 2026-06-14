@@ -60,6 +60,7 @@ export const pushApi = {
                 await pushApi.subscribe({
                     endpoint: s.endpoint,
                     keys:     { p256dh: s.keys.p256dh, auth: s.keys.auth },
+                    adminId:  localStorage.getItem('adminId') || undefined,
                 });
             }
 

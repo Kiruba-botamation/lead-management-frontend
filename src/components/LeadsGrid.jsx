@@ -711,7 +711,7 @@ const LeadsGrid = () => {
     }, [acctId, userEmail]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Real-time reminder stream + bell badge ────────────────────────────────
-    const { firedCount, setFiredCount } = useReminderStream({ showReminder, onNewFired: null });
+    const { firedCount, setFiredCount } = useReminderStream({ showReminder, onNewFired: null, acctId, adminId: currentAdminId });
 
     // ── Lead data ─────────────────────────────────────────────────────────────
     const [leads, setLeads]             = useState([]);

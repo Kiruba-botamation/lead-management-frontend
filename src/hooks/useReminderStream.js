@@ -20,8 +20,10 @@ import { remindersApi } from '../api/remindersApi';
 /**
  * @param {function} showReminder  - from useNotifications() — shows violet reminder toast
  * @param {function} onNewFired    - called when a new reminder fires (increments bell badge)
+ * @param {string}   acctId        - current account ID (required for middleware identity resolution)
+ * @param {string}   adminId       - account_admins._id from localStorage (primary identity)
  */
-export const useReminderStream = ({ showReminder, onNewFired }) => {
+export const useReminderStream = ({ showReminder, onNewFired, acctId, adminId }) => {
     const navigate        = useNavigate();
     const eventSourceRef  = useRef(null);
     const reconnectTimer  = useRef(null);
@@ -29,21 +31,26 @@ export const useReminderStream = ({ showReminder, onNewFired }) => {
 
     // ── Fetch initial unread count (bell badge on mount) ─────────────────────
     const fetchFiredCount = useCallback(async () => {
+        if (!adminId) return;
         try {
-            const res = await remindersApi.getFired();
+            const res = await remindersApi.getFired(1, 10, adminId);
             setFiredCount(res.data?.count ?? 0);
         } catch {
             // Non-fatal — badge just won't show a count
         }
-    }, []);
+    }, [adminId]);
 
     // ── SSE connection ────────────────────────────────────────────────────────
     const connectSSE = useCallback(() => {
+        // Both acctId and adminId are required — defer until they are resolved
+        if (!acctId || !adminId) return;
+
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
         }
 
-        const es = new EventSource('/api/ui/push/stream', { withCredentials: true });
+        const params = new URLSearchParams({ acctId, adminId });
+        const es = new EventSource(`/api/ui/push/stream?${params}`, { withCredentials: true });
 
         es.onmessage = (event) => {
             try {
@@ -80,7 +87,7 @@ export const useReminderStream = ({ showReminder, onNewFired }) => {
         };
 
         eventSourceRef.current = es;
-    }, [showReminder, onNewFired, navigate]);
+    }, [showReminder, onNewFired, navigate, acctId, adminId]);
 
     // ── Browser push — silent subscribe if permission already granted ─────────
     const setupBrowserPush = useCallback(async () => {
@@ -106,6 +113,7 @@ export const useReminderStream = ({ showReminder, onNewFired }) => {
 
         return () => {
             eventSourceRef.current?.close();
+            eventSourceRef.current = null;
             clearTimeout(reconnectTimer.current);
         };
     }, [fetchFiredCount, connectSSE, setupBrowserPush]);

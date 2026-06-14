@@ -22,6 +22,9 @@ function formatScheduledAt(dateStr) {
 
 export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const navigate     = useNavigate();
+    // adminId is account_admins._id stored in localStorage by resolveChatbotAdmin.
+    // Read once on mount — stable for the component lifetime (re-mounts on account switch).
+    const adminId      = localStorage.getItem('adminId') || '';
     const [isOpen,     setIsOpen]     = useState(false);
     const [reminders,  setReminders]  = useState([]);
     const [loading,    setLoading]    = useState(false);
@@ -49,13 +52,13 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const fetchFirst = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await remindersApi.getFired(1, PAGE_SIZE);
+            const res = await remindersApi.getFired(1, PAGE_SIZE, adminId);
             setReminders(res.data?.data || []);
             setHasMore(res.data?.hasMore || false);
             setPage(1);
         } catch { /* non-fatal */ }
         finally { setLoading(false); }
-    }, []);
+    }, [adminId]);
 
     // Fetch next page and append
     const fetchMore = useCallback(async () => {
@@ -63,13 +66,13 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         setLoadingMore(true);
         try {
             const nextPage = page + 1;
-            const res = await remindersApi.getFired(nextPage, PAGE_SIZE);
+            const res = await remindersApi.getFired(nextPage, PAGE_SIZE, adminId);
             setReminders(prev => [...prev, ...(res.data?.data || [])]);
             setHasMore(res.data?.hasMore || false);
             setPage(nextPage);
         } catch { /* non-fatal */ }
         finally { setLoadingMore(false); }
-    }, [page, hasMore, loadingMore]);
+    }, [page, hasMore, loadingMore, adminId]);
 
     // Infinite scroll — detect when list reaches bottom
     const handleListScroll = useCallback(() => {
@@ -87,7 +90,7 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         navigate(`/leads?openLead=${rem.leadId}&tab=reminders`);
         if (!rem.notificationRead) {
             setReminders(prev => prev.map(r => r._id === rem._id ? { ...r, notificationRead: true } : r));
-            try { await remindersApi.markRead([rem._id]); } catch { /* non-fatal */ }
+            try { await remindersApi.markRead([rem._id], adminId); } catch { /* non-fatal */ }
         }
     };
 
@@ -95,7 +98,7 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const handleDismiss = async (e, rem) => {
         e.stopPropagation();
         setReminders(prev => prev.filter(r => r._id !== rem._id));
-        try { await remindersApi.dismissFired(rem._id); } catch {
+        try { await remindersApi.dismissFired(rem._id, adminId); } catch {
             setReminders(prev => [rem, ...prev]);
         }
     };
@@ -105,7 +108,7 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         const snapshot = reminders;
         setReminders([]);
         setHasMore(false);
-        try { await Promise.all(snapshot.map(r => remindersApi.dismissFired(r._id))); }
+        try { await Promise.all(snapshot.map(r => remindersApi.dismissFired(r._id, adminId))); }
         catch { setReminders(snapshot); }
     };
 

@@ -7,7 +7,7 @@ export const notesApi = {
     getAll:  (leadId, acctId)                      => api.get(BASE(leadId),                                { params: { acctId } }),
 
     /** Create a new note */
-    create:  (leadId, description, acctId)          => api.post(BASE(leadId), { description },              { params: { acctId } }),
+    create:  (leadId, description, acctId, adminId) => api.post(BASE(leadId), { description, adminId },     { params: { acctId } }),
 
     /** Update a note (creator only) */
     update:  (leadId, noteId, description, acctId)  => api.put(`${BASE(leadId)}/${noteId}`, { description }, { params: { acctId } }),

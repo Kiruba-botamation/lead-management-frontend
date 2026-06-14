@@ -257,6 +257,7 @@ export default function LeadActivityPanel({
                         <AddNoteForm
                             leadId={leadId}
                             acctId={acctId}
+                            adminId={currentAdminId}
                             onNoteAdded={handleNoteAdded}
                             onError={onError}
                         />
@@ -288,6 +289,7 @@ export default function LeadActivityPanel({
                             <AddReminderForm
                                 leadId={leadId}
                                 acctId={acctId}
+                                adminId={currentAdminId}
                                 reminder={editReminder}
                                 adminHasPhone={adminHasPhone}
                                 onSaved={handleReminderSaved}

@@ -156,7 +156,7 @@ function PushBanner({ state, onEnable }) {
  * @param {function}      onCancel       - Called when the user dismisses the form
  * @param {function}      onError(msg)   - Called with an error message string
  */
-export default function AddReminderForm({ leadId, acctId, reminder, adminHasPhone, onSaved, onCancel, onError }) {
+export default function AddReminderForm({ leadId, acctId, adminId, reminder, adminHasPhone, onSaved, onCancel, onError }) {
     const isEdit    = Boolean(reminder);
     const initSplit = splitDatetime(reminder?.scheduledAt);
 
@@ -251,6 +251,7 @@ export default function AddReminderForm({ leadId, acctId, reminder, adminHasPhon
                 preReminderValue:   preEnabled ? Number(preValue) : undefined,
                 preReminderUnit:    preEnabled ? preUnit : undefined,
                 channels:           activeChannels,
+                adminId,
             };
             const res = isEdit
                 ? await remindersApi.update(leadId, reminder._id, data, acctId)

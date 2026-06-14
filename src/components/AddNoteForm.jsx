@@ -8,7 +8,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { notesApi } from '../api/notesApi';
 
-export default function AddNoteForm({ leadId, acctId, onNoteAdded, onError }) {
+export default function AddNoteForm({ leadId, acctId, adminId, onNoteAdded, onError }) {
     const [open,        setOpen]        = useState(false);
     const [description, setDescription] = useState('');
     const [saving,      setSaving]      = useState(false);
@@ -29,7 +29,7 @@ export default function AddNoteForm({ leadId, acctId, onNoteAdded, onError }) {
         if (!trimmed) return;
         setSaving(true);
         try {
-            const res = await notesApi.create(leadId, trimmed, acctId);
+            const res = await notesApi.create(leadId, trimmed, acctId, adminId);
             onNoteAdded(res.data?.data);
             setDescription('');
             setOpen(false);
