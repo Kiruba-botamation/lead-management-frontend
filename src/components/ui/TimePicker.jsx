@@ -1,42 +1,63 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-const HOURS_12 = ['12', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11'];
-const MINUTES  = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
-
-function snapMinute(mStr) {
-    const n = parseInt(mStr, 10);
-    const snapped = String(Math.round(n / 5) * 5 % 60).padStart(2, '0');
-    return MINUTES.includes(snapped) ? snapped : '00';
-}
-
 function parse12h(value) {
     if (!value) return { h12: '10', minute: '00', period: 'AM' };
     const [hStr = '10', mStr = '00'] = value.split(':');
     const h = parseInt(hStr, 10);
     return {
         h12:    String(h % 12 || 12).padStart(2, '0'),
-        minute: snapMinute(mStr),
+        minute: mStr.padStart(2, '0'),
         period: h < 12 ? 'AM' : 'PM',
     };
 }
 
 function to24h(h12str, minuteStr, period) {
-    const h12 = parseInt(h12str, 10);
-    let h24 = period === 'AM' ? (h12 === 12 ? 0 : h12) : (h12 === 12 ? 12 : h12 + 12);
-    return `${String(h24).padStart(2, '0')}:${minuteStr}`;
+    const h12 = parseInt(h12str, 10) || 12;
+    const h24 = period === 'AM' ? (h12 === 12 ? 0 : h12) : (h12 === 12 ? 12 : h12 + 12);
+    return `${String(h24).padStart(2, '0')}:${minuteStr.padStart(2, '0')}`;
 }
 
-export default function TimePicker({ value, onChange, placeholder = 'Select time' }) {
-    const { h12, minute, period } = parse12h(value);
+function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
+
+// Select-all deferred past the browser's mouseup cursor positioning
+function selectAll(e) { const t = e.target; setTimeout(() => t.select(), 0); }
+
+export default function TimePicker({ value, onChange, placeholder = 'Select time', minTime }) {
+    const parsed = parse12h(value);
 
     const [open, setOpen]           = useState(false);
     const [popupStyle, setPopupStyle] = useState({});
+    const [inputHour, setInputHour] = useState(parsed.h12);
+    const [inputMin, setInputMin]   = useState(parsed.minute);
+    const [period, setPeriod]       = useState(parsed.period);
+    const [error, setError]         = useState('');
 
     const triggerRef = useRef(null);
     const popupRef   = useRef(null);
-    const hourColRef = useRef(null);
-    const minColRef  = useRef(null);
+    const hourRef    = useRef(null);
+
+    // Sync local state when popup opens
+    useEffect(() => {
+        if (!open) return;
+        const p = parse12h(value);
+        setInputHour(p.h12);
+        setInputMin(p.minute);
+        setPeriod(p.period);
+        setError('');
+        setTimeout(() => { hourRef.current?.focus(); hourRef.current?.select(); }, 30);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    // Clamp popup left so it doesn't overflow viewport
+    useEffect(() => {
+        if (!open || !popupRef.current) return;
+        const rect = popupRef.current.getBoundingClientRect();
+        const overflow = rect.right - (window.innerWidth - 8);
+        if (overflow > 0) {
+            setPopupStyle(prev => ({ ...prev, left: Math.max(8, (prev.left ?? 0) - overflow) }));
+        }
+    }, [open]);
 
     // Close on outside click / Escape
     useEffect(() => {
@@ -50,28 +71,10 @@ export default function TimePicker({ value, onChange, placeholder = 'Select time
         const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
         document.addEventListener('mousedown', onDown);
         document.addEventListener('keydown', onKey);
-        return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
-    }, [open]);
-
-    // Scroll selected option into centre of its column when popup opens,
-    // and clamp popup left so it never overflows the right edge of the viewport
-    useEffect(() => {
-        if (!open) return;
-
-        // Clamp horizontal position after the popup has rendered and has a width
-        if (popupRef.current) {
-            const rect = popupRef.current.getBoundingClientRect();
-            const overflow = rect.right - (window.innerWidth - 8);
-            if (overflow > 0) {
-                setPopupStyle(prev => ({ ...prev, left: Math.max(8, (prev.left ?? 0) - overflow) }));
-            }
-        }
-
-        [hourColRef, minColRef].forEach(ref => {
-            if (!ref.current) return;
-            const sel = ref.current.querySelector('.tp-option--selected');
-            if (sel) sel.scrollIntoView({ block: 'center', behavior: 'instant' });
-        });
+        return () => {
+            document.removeEventListener('mousedown', onDown);
+            document.removeEventListener('keydown', onKey);
+        };
     }, [open]);
 
     const openPopup = () => {
@@ -82,86 +85,113 @@ export default function TimePicker({ value, onChange, placeholder = 'Select time
                 position: 'fixed',
                 left: r.left,
                 zIndex: 9999,
-                ...(spaceBelow >= 240 ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
+                ...(spaceBelow >= 120 ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
             });
         }
         setOpen(v => !v);
     };
 
-    const pickHour   = (h) => { onChange(to24h(h, minute, period)); };
-    const pickMinute = (m) => { onChange(to24h(h12, m, period)); };
-    const pickPeriod = (p) => { onChange(to24h(h12, minute, p)); };
+    const clearError = () => { if (error) setError(''); };
 
-    const displayText = value
-        ? `${h12}:${minute} ${period}`
-        : null;
+    // Strip non-digits, keep last 2 typed (handles overtype without maxLength blocking)
+    const handleHourChange = (e) => {
+        let digits = e.target.value.replace(/\D/g, '');
+        if (digits.length > 2) digits = digits.slice(-2);
+        if (digits.length === 2) {
+            const n = parseInt(digits, 10);
+            if (n > 12) digits = '12';
+            else if (n < 1) digits = '01';
+        }
+        setInputHour(digits);
+        clearError();
+    };
+
+    const handleHourBlur = () => {
+        const n = clamp(parseInt(inputHour, 10) || 12, 1, 12);
+        setInputHour(String(n).padStart(2, '0'));
+    };
+
+    const handleMinChange = (e) => {
+        let digits = e.target.value.replace(/\D/g, '');
+        if (digits.length > 2) digits = digits.slice(-2);
+        if (digits.length === 2) {
+            const n = parseInt(digits, 10);
+            if (n > 59) digits = '59';
+        }
+        setInputMin(digits);
+        clearError();
+    };
+
+    const handleMinBlur = () => {
+        const n = clamp(parseInt(inputMin, 10) || 0, 0, 59);
+        setInputMin(String(n).padStart(2, '0'));
+    };
+
+    const confirm = () => {
+        const h = String(clamp(parseInt(inputHour, 10) || 12, 1, 12));
+        const m = String(clamp(parseInt(inputMin, 10) || 0, 0, 59)).padStart(2, '0');
+        const time24 = to24h(h, m, period);
+        if (minTime && time24 < minTime) {
+            setError('Time is in the past');
+            return;
+        }
+        setError('');
+        onChange(time24);
+        setOpen(false);
+    };
+
+    const handleKeyDown = (e) => { if (e.key === 'Enter') confirm(); };
+
+    const { h12, minute, period: disPeriod } = parse12h(value);
+    const displayText = value ? `${h12}:${minute} ${disPeriod}` : null;
 
     const popup = open && createPortal(
         <div ref={popupRef} className="tp-popup" style={popupStyle}>
-            <div className="tp-cols">
-
-                {/* Hours */}
-                <div className="tp-col-wrap">
-                    <div className="tp-col-label">Hour</div>
-                    <div className="tp-col" ref={hourColRef}>
-                        {HOURS_12.map(h => (
-                            <button
-                                key={h}
-                                type="button"
-                                className={`tp-option${h12 === h ? ' tp-option--selected' : ''}`}
-                                onClick={() => pickHour(h)}
-                            >
-                                {h}
-                            </button>
-                        ))}
-                    </div>
+            <div className="tp-inputs-row">
+                <input
+                    ref={hourRef}
+                    type="text"
+                    inputMode="numeric"
+                    className="tp-time-input"
+                    value={inputHour}
+                    onChange={handleHourChange}
+                    onFocus={selectAll}
+                    onBlur={handleHourBlur}
+                    onKeyDown={handleKeyDown}
+                    placeholder="hh"
+                    aria-label="Hour"
+                />
+                <span className="tp-colon">:</span>
+                <input
+                    type="text"
+                    inputMode="numeric"
+                    className="tp-time-input"
+                    value={inputMin}
+                    onChange={handleMinChange}
+                    onFocus={selectAll}
+                    onBlur={handleMinBlur}
+                    onKeyDown={handleKeyDown}
+                    placeholder="mm"
+                    aria-label="Minute"
+                />
+                <div className="tp-period-group">
+                    {['AM', 'PM'].map(p => (
+                        <button
+                            key={p}
+                            type="button"
+                            className={`tp-period-btn${period === p ? ' tp-period-btn--active' : ''}`}
+                            onClick={() => { setPeriod(p); clearError(); }}
+                        >
+                            {p}
+                        </button>
+                    ))}
                 </div>
-
-                <div className="tp-colon">:</div>
-
-                {/* Minutes */}
-                <div className="tp-col-wrap">
-                    <div className="tp-col-label">Min</div>
-                    <div className="tp-col" ref={minColRef}>
-                        {MINUTES.map(m => (
-                            <button
-                                key={m}
-                                type="button"
-                                className={`tp-option${minute === m ? ' tp-option--selected' : ''}`}
-                                onClick={() => pickMinute(m)}
-                            >
-                                {m}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* AM / PM */}
-                <div className="tp-col-wrap">
-                    <div className="tp-col-label">Period</div>
-                    <div className="tp-col tp-col--period">
-                        {['AM', 'PM'].map(p => (
-                            <button
-                                key={p}
-                                type="button"
-                                className={`tp-option${period === p ? ' tp-option--selected' : ''}`}
-                                onClick={() => pickPeriod(p)}
-                            >
-                                {p}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
             </div>
 
-            {/* OK button */}
+            {error && <p className="tp-error">{error}</p>}
+
             <div className="tp-footer">
-                <button
-                    type="button"
-                    className="tp-ok-btn"
-                    onClick={() => setOpen(false)}
-                >
+                <button type="button" className="tp-ok-btn" onClick={confirm}>
                     OK
                 </button>
             </div>

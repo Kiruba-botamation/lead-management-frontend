@@ -60,6 +60,12 @@ function todayStr() {
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 }
 
+function nowTimeStr() {
+    const d   = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
 /** Returns { date, time } for tomorrow at 10:00 AM */
 function nextDayAt10AM() {
     const d   = new Date();
@@ -377,6 +383,7 @@ export default function AddReminderForm({
                             <TimePicker
                                 value={schedTime}
                                 onChange={setSchedTime}
+                                minTime={schedDate === todayStr() ? nowTimeStr() : undefined}
                             />
                         </div>
                     </div>
@@ -542,6 +549,7 @@ export default function AddReminderForm({
                                         <TimePicker
                                             value={clientTime}
                                             onChange={setClientTime}
+                                            minTime={clientDate === todayStr() ? nowTimeStr() : undefined}
                                         />
                                     </div>
                                 </div>
