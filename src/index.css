@@ -12,6 +12,7 @@
 @import './styles/components/radio.css';
 @import './styles/components/combobox.css';
 @import './styles/components/activity-panel.css';
+@import './styles/components/date-time-picker.css';
 
 @tailwind base;
 @tailwind components;

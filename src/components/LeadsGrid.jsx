@@ -17,7 +17,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
-import { useAuth, resolveChatbotAdmin } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { Combobox } from './ui/Combobox';
 import { useNotifications } from './Notifications';
 import { useReminderStream } from '../hooks/useReminderStream';
@@ -50,6 +50,23 @@ import { CSS } from '@dnd-kit/utilities';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0284c7'];
+
+/** Stable colour for a responsible/admin name, seeded on its first two letters. */
+const twoLetterColor = (name) => {
+    if (!name) return COLORS[0];
+    const seed = (name.charCodeAt(0) || 0) + (name.charCodeAt(1) || 0);
+    return COLORS[seed % COLORS.length];
+};
+
+const adminDisplayName = (a) => (a?.firstName || [a?.firstName, a?.lastName].filter(Boolean).join(' ') || 'Unknown');
+
+/** Opaque light tint of a hex colour (mixed with white) — used to paint the pinned Responsible cell. */
+const tint = (hex, ratio = 0.16) => {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const mix = (c) => Math.round(c * ratio + 255 * (1 - ratio));
+    return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+};
 
 /** Fields that are framework-internal and never rendered as grid columns */
 const EXCLUDE_FROM_GRID = new Set(['__v', '_id', 'acctId', 'categoryId', 'adminName', 'adminProfileImage']);
@@ -329,6 +346,18 @@ const FilterPopup = ({
         const activeField = fields.find(f => isFilterActive(filters[f]));
         return activeField || fields[0] || '';
     });
+    const [fieldDropdownOpen, setFieldDropdownOpen] = React.useState(false);
+    const fieldDropdownRef = React.useRef(null);
+
+    React.useEffect(() => {
+        if (!fieldDropdownOpen) return;
+        const handler = (e) => {
+            if (fieldDropdownRef.current && !fieldDropdownRef.current.contains(e.target))
+                setFieldDropdownOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [fieldDropdownOpen]);
 
     const colDef      = columnDefMap.get(selectedField);
     const activeRows  = fields.filter(f => isFilterActive(filters[f]));
@@ -380,22 +409,41 @@ const FilterPopup = ({
                         <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                             Select Column
                         </label>
-                        <select
-                            value={selectedField}
-                            onChange={e => setSelectedField(e.target.value)}
-                            className="w-full px-3 py-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition-all cursor-pointer"
-                        >
-                            {fields.map(f => {
-                                const def   = columnDefMap.get(f);
-                                const lbl   = def?.label || SYSTEM_LABELS[f] || f;
-                                const hasFilter = isFilterActive(filters[f]);
-                                return (
-                                    <option key={f} value={f}>
-                                        {lbl}{hasFilter ? ' ●' : ''}
-                                    </option>
-                                );
-                            })}
-                        </select>
+                        <div className="relative" ref={fieldDropdownRef}>
+                            <button
+                                type="button"
+                                onClick={() => setFieldDropdownOpen(v => !v)}
+                                className="w-full px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg flex items-center justify-between hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all"
+                            >
+                                <span className="truncate">
+                                    {columnDefMap.get(selectedField)?.label || SYSTEM_LABELS[selectedField] || selectedField}
+                                </span>
+                                <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 ml-2 transition-transform ${fieldDropdownOpen ? 'rotate-180' : ''}`}
+                                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            {fieldDropdownOpen && (
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 max-h-52 overflow-y-auto">
+                                    {fields.map(f => {
+                                        const def = columnDefMap.get(f);
+                                        const lbl = def?.label || SYSTEM_LABELS[f] || f;
+                                        const hasFilter = isFilterActive(filters[f]);
+                                        return (
+                                            <button
+                                                key={f}
+                                                type="button"
+                                                onClick={() => { setSelectedField(f); setFieldDropdownOpen(false); }}
+                                                className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between transition-colors ${f === selectedField ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            >
+                                                <span className="truncate">{lbl}</span>
+                                                {hasFilter && <span className="text-indigo-500 text-xs ml-2 flex-shrink-0">●</span>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
 
                         {/* Type badge */}
                         {colDef && (
@@ -615,7 +663,62 @@ const DragOverlayColumnHeader = ({ field, label }) => (
 
 // ── Add/Edit lead form (right panel) ──────────────────────────────────────────
 
-const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditForm, onSave, onCancel, isSaving }) => {
+/**
+ * Responsible (assignee) picker — a custom dropdown so we can show each admin's
+ * avatar + first name. The first option is "None" (unassigned). The selected
+ * value stored in the form is the admin's userId (empty string when unassigned).
+ */
+const ResponsibleSelect = ({ admins, value, onChange, disabled }) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDocClick);
+        return () => document.removeEventListener('mousedown', onDocClick);
+    }, []);
+
+    const selected = admins.find(a => a.userId === value) || null;
+
+    const renderAvatar = (a, size = 'w-5 h-5') => {
+        const name = adminDisplayName(a);
+        return a.profileImage
+            ? <img src={a.profileImage} alt="" className={`${size} rounded-full object-cover border border-gray-200`} onError={e => { e.target.style.display = 'none'; }} />
+            : <span className={`${size} rounded-full flex items-center justify-center text-white font-bold text-[9px] select-none`} style={{ backgroundColor: twoLetterColor(name) }}>{name.charAt(0).toUpperCase()}</span>;
+    };
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setOpen(o => !o)}
+                className="ds-input ds-input--sm w-full flex items-center justify-between gap-2 text-left disabled:opacity-50"
+            >
+                <span className="flex items-center gap-1.5 min-w-0">
+                    {selected ? (<>{renderAvatar(selected)}<span className="truncate">{adminDisplayName(selected)}</span></>) : <span className="text-gray-400">None</span>}
+                </span>
+                <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {open && (
+                <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl py-1">
+                    <button type="button" onClick={() => { onChange(''); setOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${!value ? 'bg-indigo-50' : ''}`}>
+                        <span className="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-[10px]">∅</span>
+                        <span className="text-gray-500">None</span>
+                    </button>
+                    {admins.map(a => (
+                        <button key={a.userId} type="button" onClick={() => { onChange(a.userId); setOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${value === a.userId ? 'bg-indigo-50' : ''}`}>
+                            {renderAvatar(a)}
+                            <span className="truncate text-gray-700">{adminDisplayName(a)}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditForm, onSave, onCancel, isSaving, admins }) => {
     const isEditFormDirty = editLead
         ? Object.keys(editForm).some(k => {
             const orig = editLead[k] == null ? '' : String(editLead[k]);
@@ -648,13 +751,24 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
 
                         return (
                             <div key={fieldKey}>
-                                <label className="block text-xs font-semibold text-gray-700 mb-1">{label}</label>
-                                <FormFieldInput
-                                    type={type}
-                                    value={editForm[fieldKey] ?? ''}
-                                    onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
-                                    disabled={isSaving}
-                                />
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                    {fieldKey === 'responsible' ? 'Responsible' : label}
+                                </label>
+                                {fieldKey === 'responsible' ? (
+                                    <ResponsibleSelect
+                                        admins={admins}
+                                        value={editForm[fieldKey] ?? ''}
+                                        onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
+                                        disabled={isSaving}
+                                    />
+                                ) : (
+                                    <FormFieldInput
+                                        type={type}
+                                        value={editForm[fieldKey] ?? ''}
+                                        onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
+                                        disabled={isSaving}
+                                    />
+                                )}
                             </div>
                         );
                     })}
@@ -695,23 +809,30 @@ const LeadsGrid = () => {
     const location                             = useLocation();
     const { showSuccess, showError, showWarning, showReminder, NotificationComponent } = useNotifications();
     const { acctNo, acctId, isAccountLinked, accountsLoaded, accountsLoading, setIsLinkDialogOpen } = useAccount();
-    const { userDetails, adminId, chatbotAdmin, setChatbotAdmin, setAdminId, user: rawUser } = useAuth();
+    const { userDetails, chatbotAdmin, user: rawUser } = useAuth();
 
-    // ── Current admin identity ────────────────────────────────────────────────
-    const currentAdminId = adminId || localStorage.getItem('adminId') || '';
+    // ── Current user identity ─────────────────────────────────────────────────
+    // Notes, reminders and the bell/SSE stream are all keyed by the lead-app userId.
+    const currentUserId  = rawUser?.userId || localStorage.getItem('userId') || '';
     const adminHasPhone  = Boolean(userDetails?.phone);
 
-    // ── Resolve chatbot admin identity whenever acctId changes ────────────────
-    // Covers: page load, account switch, admin list refresh.
-    // acctId no longer lives in the JWT, so we resolve here where acctId is known.
-    const userEmail = rawUser?.email || userDetails?.email || '';
+    // Admin identity + access level are resolved centrally in AccountContext.
+
+    // ── Admins for the Responsible dropdown ───────────────────────────────────
+    const [adminsList, setAdminsList] = useState([]);
     useEffect(() => {
-        if (!acctId || !userEmail) return;
-        resolveChatbotAdmin(acctId, userEmail, setChatbotAdmin, setAdminId);
-    }, [acctId, userEmail]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (!acctId) { setAdminsList([]); return; }
+        api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } })
+            .then(res => {
+                const raw = res.data;
+                const list = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
+                setAdminsList(list.filter(a => a.userId));
+            })
+            .catch(() => setAdminsList([]));
+    }, [acctId]);
 
     // ── Real-time reminder stream + bell badge ────────────────────────────────
-    const { firedCount, setFiredCount } = useReminderStream({ showReminder, onNewFired: null, acctId, adminId: currentAdminId });
+    const { firedCount, setFiredCount } = useReminderStream({ showReminder, onNewFired: null, acctId, userId: currentUserId });
 
     // ── Lead data ─────────────────────────────────────────────────────────────
     const [leads, setLeads]             = useState([]);
@@ -1290,26 +1411,6 @@ const LeadsGrid = () => {
 
     // ── Row cell renderer ─────────────────────────────────────────────────────
     const renderCell = (field, lead) => {
-        if (field === 'responsible' || field === 'adminId') {
-            if (!lead[field]) return <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">-</td>;
-            const name    = lead.adminName || lead[field];
-            const imgUrl  = lead.adminProfileImage || null;
-            const initial = name && name !== '-' ? name.charAt(0).toUpperCase() : null;
-            const color   = initial ? COLORS[(initial.charCodeAt(0) || 0) % COLORS.length] : null;
-            return (
-                <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
-                    <div className="flex items-center gap-1.5 justify-center">
-                        {imgUrl ? (
-                            <img src={imgUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-gray-200" onError={e => { e.target.style.display = 'none'; }} />
-                        ) : initial ? (
-                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold text-[9px] select-none" style={{ backgroundColor: color }}>{initial}</span>
-                        ) : null}
-                        <span>{name || '-'}</span>
-                    </div>
-                </td>
-            );
-        }
-
         const colDef = columnDefMap.get(field);
         return (
             <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
@@ -1318,7 +1419,48 @@ const LeadsGrid = () => {
         );
     };
 
+    /**
+     * Responsible (assignee) cell — pinned as the first column. The whole cell
+     * background is painted with a stable colour seeded on the assignee's name.
+     * Falls back to the snapshot name ("adminName" = 'Unknown' when an assigned
+     * admin has been removed).
+     */
+    const renderResponsibleCell = (lead) => {
+        const assigned = !!lead.responsible;
+        const name     = lead.adminName || (assigned ? 'Unknown' : '');
+        const imgUrl   = lead.adminProfileImage || null;
+        const baseColor = assigned ? twoLetterColor(name) : null;
+        return (
+            <td
+                className="px-3 py-2 whitespace-nowrap text-[11px] font-medium sticky left-0 z-10 transition-colors"
+                style={{
+                    boxShadow: '4px 0 8px -2px rgba(0,0,0,0.06)',
+                    backgroundColor: assigned ? tint(baseColor) : '#ffffff'
+                }}
+            >
+                {assigned ? (
+                    <div className="flex items-center gap-1.5">
+                        {imgUrl ? (
+                            <img src={imgUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-white/70" onError={e => { e.target.style.display = 'none'; }} />
+                        ) : (
+                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold text-[9px] select-none" style={{ backgroundColor: baseColor }}>
+                                {name.charAt(0).toUpperCase()}
+                            </span>
+                        )}
+                        <span className="truncate text-gray-800">{name}</span>
+                    </div>
+                ) : (
+                    <span className="text-gray-400">Unassigned</span>
+                )}
+            </td>
+        );
+    };
+
     const displayFields = visibleFields ?? fields;
+    // Responsible is rendered as a dedicated pinned-left column, never inside the
+    // draggable/sortable set.
+    const hasResponsibleCol = displayFields.includes('responsible');
+    const gridFields = hasResponsibleCol ? displayFields.filter(f => f !== 'responsible') : displayFields;
 
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -1559,11 +1701,16 @@ const LeadsGrid = () => {
 
                                         <div className="flex-1 overflow-y-scroll overflow-x-auto min-h-0">
                                             <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
-                                                <thead className="sticky top-0 z-10 bg-white/70 backdrop-blur-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] transition-all group/header">
+                                                <thead className="sticky top-0 z-20 bg-white/70 backdrop-blur-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] transition-all group/header">
                                                     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragStart={handleColumnDragStart} onDragEnd={handleColumnDragEnd}>
-                                                        <SortableContext items={displayFields} strategy={horizontalListSortingStrategy}>
+                                                        <SortableContext items={gridFields} strategy={horizontalListSortingStrategy}>
                                                             <tr>
-                                                                {displayFields.map(field => {
+                                                                {hasResponsibleCol && (
+                                                                    <th className="px-3 py-2.5 text-left align-middle sticky left-0 z-30 bg-white/90 backdrop-blur-xl" style={{ boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
+                                                                        <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Responsible</span>
+                                                                    </th>
+                                                                )}
+                                                                {gridFields.map(field => {
                                                                     const colDef = columnDefMap.get(field);
                                                                     const label  = colDef?.label || SYSTEM_LABELS[field] || field;
                                                                     return (
@@ -1580,7 +1727,7 @@ const LeadsGrid = () => {
                                                                         />
                                                                     );
                                                                 })}
-                                                                <th className="px-3 py-2.5 text-center w-20 align-middle">
+                                                                <th className="px-3 py-2.5 text-center w-20 align-middle sticky right-0 z-30 bg-white/80 backdrop-blur-xl" style={{ boxShadow: '-4px 0 8px -2px rgba(0,0,0,0.08)' }}>
                                                                     <div className="flex items-center justify-center gap-1">
                                                                         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Actions</span>
                                                                     </div>
@@ -1618,9 +1765,10 @@ const LeadsGrid = () => {
                                                         </td></tr>
                                                     ) : (
                                                         leads.map((lead, idx) => (
-                                                            <tr key={lead._id} className="hover:bg-gray-50 transition-all duration-200" style={{ animationDelay: `${idx * 50}ms` }}>
-                                                                {displayFields.map(field => renderCell(field, lead))}
-                                                                <td className="px-3 py-2 whitespace-nowrap text-center">
+                                                            <tr key={lead._id} className="group hover:bg-gray-50 transition-all duration-200" style={{ animationDelay: `${idx * 50}ms` }}>
+                                                                {hasResponsibleCol && renderResponsibleCell(lead)}
+                                                                {gridFields.map(field => renderCell(field, lead))}
+                                                                <td className="px-3 py-2 whitespace-nowrap text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 transition-colors" style={{ boxShadow: '-4px 0 8px -2px rgba(0,0,0,0.06)' }}>
                                                                      <div className="flex items-center justify-center gap-1.5">
                                                                         <Tooltip content="Edit lead" placement="top">
                                                                             <button onClick={() => handleEditOpen(lead)} className="group relative w-6 h-6 flex items-center justify-center bg-transparent rounded-md hover:bg-blue-50 transition-all duration-200 hover:scale-110 border border-gray-300 hover:border-blue-300 focus:ring-1 focus:ring-blue-300">
@@ -1705,6 +1853,7 @@ const LeadsGrid = () => {
                                     onSave={handleEditSave}
                                     onCancel={cancelEdit}
                                     isSaving={isSaving}
+                                    admins={adminsList}
                                 />
                             )}
 
@@ -1713,9 +1862,10 @@ const LeadsGrid = () => {
                                 <div className="w-full sm:w-[calc(33.333%-0.5rem)] flex flex-col min-h-0">
                                     <LeadActivityPanel
                                         lead={activityLead}
-                                        leadName={displayFields[0] ? String(activityLead[displayFields[0]] || '').slice(0, 60) || 'Lead' : 'Lead'}
+                                        leadName={String(activityLead['name'] || '').slice(0, 60) || 'Lead'}
+                                        leadPhone={String(activityLead['phone'] || '')}
                                         initialTab={activityTab}
-                                        currentAdminId={currentAdminId}
+                                        currentAdminId={currentUserId}
                                         currentUser={
                                             // Priority: chatbotAdmin (from account_admins — has firstName, lastName, profileImage)
                                             // Fallback: userDetails (from auth service profile)

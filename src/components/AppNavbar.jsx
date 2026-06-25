@@ -70,7 +70,8 @@ const IconLogout = () => (
  */
 export default function AppNavbar({ activePage = '', onAccountOpen, firedCount = 0, setFiredCount }) {
     const navigate = useNavigate();
-    const { user, userDetails, logout } = useAuth();
+    const { user, userDetails, logout, accessLevel } = useAuth();
+    const isSuperadmin = accessLevel === 'superadmin';
     const {
         acctNo, acctId, acctName, accounts,
         isAccountLinked, accountsLoaded,
@@ -161,21 +162,26 @@ export default function AppNavbar({ activePage = '', onAccountOpen, firedCount =
                         <IconLeads /> Leads
                     </HeaderNavLink>
 
-                    <HeaderNavLink
-                        as="button"
-                        active={activePage === 'admin'}
-                        onClick={() => activePage !== 'admin' && navigate('/admin')}
-                    >
-                        <IconAdmin /> Admin
-                    </HeaderNavLink>
+                    {/* Admin & Settings are superadmin-only */}
+                    {isSuperadmin && (
+                        <>
+                            <HeaderNavLink
+                                as="button"
+                                active={activePage === 'admin'}
+                                onClick={() => activePage !== 'admin' && navigate('/admin')}
+                            >
+                                <IconAdmin /> Admin
+                            </HeaderNavLink>
 
-                    <HeaderNavLink
-                        as="button"
-                        active={activePage === 'settings'}
-                        onClick={() => activePage !== 'settings' && navigate('/settings')}
-                    >
-                        <IconSettings /> Settings
-                    </HeaderNavLink>
+                            <HeaderNavLink
+                                as="button"
+                                active={activePage === 'settings'}
+                                onClick={() => activePage !== 'settings' && navigate('/settings')}
+                            >
+                                <IconSettings /> Settings
+                            </HeaderNavLink>
+                        </>
+                    )}
                 </HeaderNav>
             </HeaderStart>
 

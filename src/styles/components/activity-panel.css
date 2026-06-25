@@ -38,6 +38,13 @@
     max-width: 220px;
 }
 
+.activity-panel__lead-phone {
+    font-size: var(--text-2xs);
+    font-weight: var(--font-medium);
+    color: var(--color-primary-600);
+    margin-top: 1px;
+}
+
 .activity-panel__subtitle {
     font-size: var(--text-2xs);
     color: var(--color-text-subtle);
@@ -141,11 +148,13 @@
 
 /* ── Note card ───────────────────────────────────────────────── */
 .note-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    background: linear-gradient(135deg, rgba(238, 242, 255, 0.55) 0%, var(--color-surface) 65%);
+    border: 1px solid rgba(165, 180, 252, 0.45);
+    border-left: 3px solid var(--color-primary-300);
     border-radius: var(--radius-lg);
     padding: var(--space-3);
-    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+    box-shadow: 0 1px 4px rgba(99, 102, 241, 0.07);
+    transition: box-shadow var(--transition-fast), border-color var(--transition-fast), border-left-color var(--transition-fast);
     position: relative;
     animation: card-fade-in var(--duration-normal) var(--ease-out) both;
 }
@@ -156,8 +165,9 @@
 }
 
 .note-card:hover {
-    border-color: var(--color-primary-200);
-    box-shadow: var(--shadow-sm);
+    border-color: var(--color-primary-300);
+    border-left-color: var(--color-primary-500);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.13);
 }
 
 .note-card__admin-row {
@@ -329,22 +339,50 @@
 
 /* ── Reminder card ───────────────────────────────────────────── */
 .reminder-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    background: linear-gradient(135deg, rgba(255, 251, 235, 0.6) 0%, var(--color-surface) 65%);
+    border: 1px solid rgba(252, 211, 77, 0.45);
+    border-left: 3px solid var(--color-warning-300);
     border-radius: var(--radius-lg);
     /* No overflow:hidden here — it was clipping the channel badge row.
        Border-radius on child elements is handled per-element instead. */
-    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+    box-shadow: 0 1px 4px rgba(245, 158, 11, 0.07);
+    transition: box-shadow var(--transition-fast), border-color var(--transition-fast), border-left-color var(--transition-fast);
     animation: card-fade-in var(--duration-normal) var(--ease-out) both;
 }
 
 .reminder-card:hover {
-    border-color: var(--color-primary-200);
-    box-shadow: var(--shadow-sm);
+    border-color: var(--color-warning-300);
+    border-left-color: var(--color-warning-500);
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.12);
 }
 
-.reminder-card--sent {
-    opacity: 0.65;
+/* Upcoming reminder — vibrant amber */
+.reminder-card--upcoming {
+    background: linear-gradient(135deg, rgba(255, 251, 235, 0.7) 0%, var(--color-surface) 65%);
+    border-color: rgba(252, 211, 77, 0.5);
+    border-left-color: var(--color-warning-400);
+}
+
+.reminder-card--upcoming:hover {
+    border-color: var(--color-warning-300);
+    border-left-color: var(--color-warning-500);
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.15);
+}
+
+/* Past / sent reminder — muted grey */
+.reminder-card--past {
+    background: linear-gradient(135deg, rgba(249, 250, 251, 0.8) 0%, var(--color-surface) 65%);
+    border-color: rgba(209, 213, 219, 0.6);
+    border-left-color: var(--color-gray-300);
+    box-shadow: none;
+    opacity: 0.82;
+}
+
+.reminder-card--past:hover {
+    border-color: var(--color-gray-300);
+    border-left-color: var(--color-gray-400);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    opacity: 1;
 }
 
 .reminder-card__header {
@@ -352,9 +390,14 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2-5) var(--space-3);
-    background: var(--color-bg-subtle);
-    border-bottom: 1px solid var(--color-border);
+    background: var(--color-warning-50);
+    border-bottom: 1px solid rgba(252, 211, 77, 0.35);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.reminder-card--past .reminder-card__header {
+    background: var(--color-gray-50);
+    border-bottom-color: rgba(209, 213, 219, 0.4);
 }
 
 .reminder-card__time-badge {
@@ -368,8 +411,37 @@
     min-width: 0;
 }
 
-.reminder-card__time-badge--sent {
-    color: var(--color-success-600);
+.reminder-card__time-badge--upcoming {
+    color: var(--color-warning-700);
+}
+
+.reminder-card__time-badge--past {
+    color: var(--color-gray-500);
+}
+
+/* Status pill — Upcoming / Past / Sent */
+.reminder-card__status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: var(--radius-full);
+    font-size: 9px;
+    font-weight: var(--font-bold);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.reminder-card__status-pill--upcoming {
+    background: var(--color-warning-100);
+    color: var(--color-warning-700);
+    border: 1px solid var(--color-warning-300);
+}
+
+.reminder-card__status-pill--past {
+    background: var(--color-gray-100);
+    color: var(--color-gray-500);
+    border: 1px solid var(--color-gray-200);
 }
 
 .reminder-card__body {
@@ -445,6 +517,10 @@
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     animation: card-fade-in var(--duration-normal) var(--ease-out) both;
+    /* Flex column so body scrolls while header+footer stay pinned */
+    display: flex;
+    flex-direction: column;
+    max-height: 80svh;
 }
 
 .add-reminder-form__header {
@@ -457,6 +533,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
+    flex-shrink: 0;
 }
 
 .add-reminder-form__body {
@@ -464,7 +541,17 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2-5);
+    /* Fill remaining space and scroll when content is taller than the form */
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-gray-200) transparent;
 }
+
+.add-reminder-form__body::-webkit-scrollbar { width: 4px; }
+.add-reminder-form__body::-webkit-scrollbar-track { background: transparent; }
+.add-reminder-form__body::-webkit-scrollbar-thumb { background: var(--color-gray-200); border-radius: var(--radius-full); }
 
 .add-reminder-form__label {
     display: block;
@@ -625,6 +712,7 @@
     padding: var(--space-2-5) var(--space-3);
     background: var(--color-bg-subtle);
     border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
 }
 
 .add-reminder-form__toggle-row {
@@ -664,4 +752,50 @@
 
 .add-reminder-form__toggle--on::after {
     transform: translateX(0.875rem);
+}
+
+/* ── Client Reminder — contact info pill (inside form) ───────── */
+.add-reminder-form__client-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    background: var(--color-primary-50);
+    border: 1px solid var(--color-primary-100);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+    color: var(--color-primary-700);
+}
+
+/* ── Client Reminder — card row ──────────────────────────────── */
+.reminder-card__client-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: var(--space-1);
+    padding-top: var(--space-1-5);
+    border-top: 1px dashed var(--color-border);
+}
+
+.reminder-card__client-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: var(--font-semibold);
+    color: var(--color-success-700);
+    background: var(--color-success-50);
+    border: 1px solid var(--color-success-200);
+    border-radius: var(--radius-full);
+}
+
+.reminder-card__client-status {
+    font-size: 9px;
+    color: var(--color-text-muted);
+}
+
+.reminder-card__client-status--sent {
+    color: var(--color-success-600);
+    font-weight: var(--font-semibold);
 }

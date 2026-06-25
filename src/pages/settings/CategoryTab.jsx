@@ -55,12 +55,28 @@ const FIELD_TYPE_META = {
 
 const SYSTEM_FIELDS = [
     {
-        label:    'Id',
-        field:    'id',
+        label:    'Name',
+        field:    'name',
         type:     'text',
         system:   true,
         required: true,
-        tooltip:  'Mandatory — must be provided when pushing data via API'
+        tooltip:  'Mandatory — full name of the lead'
+    },
+    {
+        label:    'Phone',
+        field:    'phone',
+        type:     'text',
+        system:   true,
+        required: true,
+        tooltip:  'Mandatory — phone number of the lead'
+    },
+    {
+        label:    'Email',
+        field:    'email',
+        type:     'text',
+        system:   true,
+        required: false,
+        tooltip:  'Optional — email address of the lead'
     },
     {
         label:    'Responsible',
@@ -136,7 +152,9 @@ const ApiInfoModal = ({ category, acctNo, acctId, onClose }) => {
 
     // Build example payload from field definitions
     const payloadFields = {
-        id:          '{{user_id}}',
+        name:        '{{full_name}}',
+        phone:       '{{phone}}',
+        email:       '{{email}}',
         responsible: '{{assigned_admin_id}}',
     };
     const dummyValue = (f) => {

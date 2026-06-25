@@ -3,12 +3,14 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import ApiTab from './settings/ApiTab';
 import CategoryTab from './settings/CategoryTab';
+import WebhooksTab from './settings/WebhooksTab';
 import DeleteAccountPage from './settings/DeleteAccountPage';
 import AppNavbar from '../components/AppNavbar';
 
 const TABS = [
     { id: 'category',      label: 'Category'       },
     { id: 'api',           label: 'API'             },
+    { id: 'webhooks',      label: 'Webhooks'        },
     { id: 'deleteAccount', label: 'Delete Account' },
 ];
 
@@ -55,6 +57,9 @@ const SettingsPage = () => {
                         )}
                         {activeTab === 'category' && (
                             <CategoryTab />
+                        )}
+                        {activeTab === 'webhooks' && (
+                            <WebhooksTab acctId={acctId} />
                         )}
                         {activeTab === 'deleteAccount' && (
                             <DeleteAccountPage

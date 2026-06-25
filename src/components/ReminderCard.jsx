@@ -54,22 +54,24 @@ const CheckIcon = () => (
 
 /**
  * @param {object}   reminder         - Reminder document from the API
- * @param {string}   currentAdminId   - Logged-in admin's userId (ownership check)
+ * @param {boolean}  canManage        - Whether the current user may edit/delete (current assignee)
  * @param {function} onEdit(reminder) - Open edit form for this reminder
  * @param {function} onDelete(id)     - Delete this reminder
  */
-export default function ReminderCard({ reminder, currentAdminId, onEdit, onDelete }) {
+export default function ReminderCard({ reminder, canManage, onEdit, onDelete }) {
     const isSent  = reminder.mainSent;
-    const isOwner = reminder.adminId === currentAdminId;
+    const isPast  = isSent || new Date(reminder.scheduledAt) <= new Date();
 
     return (
-        <div className={`reminder-card${isSent ? ' reminder-card--sent' : ''}`}>
+        <div className={`reminder-card${isPast ? ' reminder-card--past' : ' reminder-card--upcoming'}`}>
             {/* Header — scheduled time */}
             <div className="reminder-card__header">
-                <span className={`reminder-card__time-badge${isSent ? ' reminder-card__time-badge--sent' : ''}`}>
-                    {isSent ? <CheckIcon /> : <ClockIcon />}
+                <span className={`reminder-card__time-badge${isPast ? ' reminder-card__time-badge--past' : ' reminder-card__time-badge--upcoming'}`}>
+                    {isPast ? <CheckIcon /> : <ClockIcon />}
                     {formatScheduledAt(reminder.scheduledAt)}
-                    {isSent && <span style={{ marginLeft: '4px', fontSize: '10px', fontWeight: 500 }}>(Sent)</span>}
+                </span>
+                <span className={`reminder-card__status-pill${isPast ? ' reminder-card__status-pill--past' : ' reminder-card__status-pill--upcoming'}`}>
+                    {isSent ? 'Sent' : isPast ? 'Past' : 'Upcoming'}
                 </span>
             </div>
 
@@ -89,11 +91,22 @@ export default function ReminderCard({ reminder, currentAdminId, onEdit, onDelet
                             {CHANNEL_META[ch]?.label || ch}
                         </span>
                     ))}
+                    {/* Client reminder row */}
+                    {reminder.clientReminderEnabled && (
+                        <div className="reminder-card__client-row">
+                            <span className="reminder-card__client-badge">
+                                Client &middot; {(reminder.clientChannels || []).join(', ')}
+                            </span>
+                            <span className={`reminder-card__client-status${reminder.clientSent ? ' reminder-card__client-status--sent' : ''}`}>
+                                {reminder.clientSent ? 'Sent' : 'Pending'}
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* Footer — owner actions (unsent only) */}
-            {isOwner && !isSent && (
+            {/* Footer — only the current assignee, and only while pending (future, unsent) */}
+            {canManage && !isPast && (
                 <div className="reminder-card__footer">
                     <button
                         className="note-card__action-btn note-card__action-btn--edit"
@@ -107,7 +120,7 @@ export default function ReminderCard({ reminder, currentAdminId, onEdit, onDelet
                     </button>
                     <button
                         className="note-card__action-btn note-card__action-btn--delete"
-                        onClick={() => onDelete(reminder._id, reminder.adminId)}
+                        onClick={() => onDelete(reminder._id, reminder.userId)}
                         title="Delete reminder"
                     >
                         <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">

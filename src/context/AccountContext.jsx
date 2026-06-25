@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
-import { useAuth } from './AuthContext';
+import { useAuth, resolveChatbotAdmin } from './AuthContext';
 import { useNotifications } from '../components/Notifications';
 import {
     cleanupAccounts,
@@ -20,7 +20,10 @@ import {
 const AccountContext = createContext(null);
 
 export const AccountProvider = ({ children }) => {
-    const { user, userDetails, authenticated, loading: authLoading } = useAuth();
+    const {
+        user, userDetails, authenticated, loading: authLoading,
+        setChatbotAdmin, setAdminId, setAccessLevel, setAdminResolved,
+    } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -118,6 +121,41 @@ export const AccountProvider = ({ children }) => {
             fetchAccounts();
         }
     }, [authLoading, authenticated, accountsRefreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── Resolve the current user's admin identity + access level for this account ──
+    // Runs app-wide (every page) once acctId is known, so route guards and the
+    // navbar can gate Admin/Settings on accessLevel. Also pushes the user's
+    // current email/phone onto their admin record (contact sync).
+    useEffect(() => {
+        const userId = user?.userId || localStorage.getItem('userId') || '';
+        if (!acctId || !userId) return;
+
+        let cancelled = false;
+        (async () => {
+            const data = await resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId);
+            if (cancelled) return;
+            setAccessLevel(data?.accessLevel ?? null);
+            setAdminResolved(true);
+
+            // Contact sync — keep email/phone on the admin record current with the profile
+            const email = userDetails?.email || localStorage.getItem('userEmail') || '';
+            const phone = userDetails?.phone || '';
+            if (data && (email || phone)) {
+                api.post('/api/ui/admins/contact', { acctId, email, phone }).catch(() => { /* non-fatal */ });
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [acctId, user, userDetails]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // When accounts have loaded but there is no active account, mark the admin
+    // lookup resolved (non-admin) so route guards don't hang on the spinner.
+    useEffect(() => {
+        if (accountsLoaded && !acctId) {
+            setAccessLevel(null);
+            setAdminResolved(true);
+        }
+    }, [accountsLoaded, acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Re-apply ?acc= param whenever the pathname changes ────────────────────
     // Ensures the acc number stays in the URL when navigating between pages.

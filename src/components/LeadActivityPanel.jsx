@@ -71,6 +71,7 @@ function EmptyState({ tab }) {
 export default function LeadActivityPanel({
     lead,
     leadName,
+    leadPhone     = '',
     initialTab    = 'notes',
     currentAdminId,
     currentUser,          // { name, profileImageUrl } from AuthContext.userDetails
@@ -79,6 +80,8 @@ export default function LeadActivityPanel({
     onError,
 }) {
     const [activeTab,    setActiveTab]    = useState(initialTab);
+
+    useEffect(() => { setActiveTab(initialTab); }, [initialTab]);
     const [notes,        setNotes]        = useState([]);
     const [reminders,    setReminders]    = useState([]);
     const [loadingNotes, setLoadingNotes] = useState(false);
@@ -105,12 +108,23 @@ export default function LeadActivityPanel({
         }
     }, [leadId, acctId, onError]);
 
+    const sortReminders = (rems) => {
+        const now = new Date();
+        const upcoming = rems
+            .filter(r => !r.mainSent && new Date(r.scheduledAt) > now)
+            .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+        const past = rems
+            .filter(r => r.mainSent || new Date(r.scheduledAt) <= now)
+            .sort((a, b) => new Date(b.scheduledAt) - new Date(a.scheduledAt));
+        return [...upcoming, ...past];
+    };
+
     const fetchReminders = useCallback(async () => {
         if (!leadId) return;
         setLoadingRems(true);
         try {
             const res = await remindersApi.getAll(leadId, acctId);
-            setReminders(res.data?.data || []);
+            setReminders(sortReminders(res.data?.data || []));
         } catch (err) {
             onError?.(err.response?.data?.message || 'Failed to load reminders.');
         } finally {
@@ -182,9 +196,9 @@ export default function LeadActivityPanel({
     const handleReminderSaved = (rem) => {
         if (!rem) return;
         if (editReminder) {
-            setReminders(prev => prev.map(r => r._id === rem._id ? rem : r));
+            setReminders(prev => sortReminders(prev.map(r => r._id === rem._id ? rem : r)));
         } else {
-            setReminders(prev => [rem, ...prev]);
+            setReminders(prev => sortReminders([rem, ...prev]));
         }
         setShowAddForm(false);
         setEditReminder(null);
@@ -219,6 +233,9 @@ export default function LeadActivityPanel({
             <div className="activity-panel__header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ minWidth: 0 }}>
                     <p className="activity-panel__title">{panelTitle}</p>
+                    {leadPhone && (
+                        <p className="activity-panel__lead-phone">{leadPhone}</p>
+                    )}
                     <p className="activity-panel__subtitle">Notes &amp; Reminders</p>
                 </div>
                 <button className="activity-panel__close-btn" onClick={onClose} title="Close panel">
@@ -292,6 +309,9 @@ export default function LeadActivityPanel({
                                 adminId={currentAdminId}
                                 reminder={editReminder}
                                 adminHasPhone={adminHasPhone}
+                                leadName={lead?.name   || ''}
+                                leadPhone={lead?.phone  || ''}
+                                leadEmail={lead?.email  || ''}
                                 onSaved={handleReminderSaved}
                                 onCancel={handleCancelReminderForm}
                                 onError={onError}
@@ -318,7 +338,8 @@ export default function LeadActivityPanel({
                                 <ReminderCard
                                     key={rem._id}
                                     reminder={rem}
-                                    currentAdminId={currentAdminId}
+                                    // Current assignee (or creator when the lead is unassigned) may manage it
+                                    canManage={currentAdminId === (lead?.responsible || rem.userId)}
                                     onEdit={handleReminderEdit}
                                     onDelete={handleReminderDelete}
                                 />

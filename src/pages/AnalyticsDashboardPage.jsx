@@ -68,7 +68,7 @@ const AnalyticsDashboardPage = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { acctNo, acctId, accountsLoaded } = useAccount();
-    const { userDetails } = useAuth();
+    const { userDetails, user: rawUser } = useAuth();
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [chartsReady, setChartsReady] = useState(false);
@@ -905,11 +905,8 @@ const AnalyticsDashboardPage = () => {
     // Called when localStorage has no charts for the current viewingAs user.
     const handleSchemaSync = async (acctIdOverride, viewingAsOverride) => {
         const targetAcctId = acctIdOverride || acctId;
-        // Use Botamation adminId — this is the key AnalyticsSchema is stored under.
-        // Do NOT use _id (MongoDB _id), which is a different field.
-        const selectedAdminId = viewAsAdmin
-            ? String(viewAsAdmin.adminId || viewAsAdmin.id || viewAsAdmin._id || '')
-            : null;
+        // Schemas are keyed by the lead-app userId.
+        const selectedAdminId = viewAsAdmin ? String(viewAsAdmin.userId || '') : null;
         const targetViewingAs = selectedAdminId || viewingAsOverride || viewingAs;
         if (!targetAcctId || !targetViewingAs) {
             // Cannot sync — no account or user identity; unblock the UI
@@ -929,11 +926,11 @@ const AnalyticsDashboardPage = () => {
                 }
             });
             const responseData = res.data?.data;
-            const responseAdminId = responseData?.adminId;
-            // Only load if the response adminId matches the requested admin — never show another admin's charts
-            const adminIdMatches = responseAdminId && responseAdminId === targetViewingAs;
+            // The backend returns the schema for exactly the requested userId, so trust it.
+            // Guard with userId when present to never show another user's charts.
+            const userIdMatches = !responseData?.userId || responseData.userId === targetViewingAs;
 
-            if (res.data?.success && adminIdMatches && responseData?.schema) {
+            if (res.data?.success && userIdMatches && responseData?.schema) {
                 const remoteSchema = responseData.schema;
                 const store = readStore();
                 store[targetAcctId] = store[targetAcctId] || {};
@@ -1006,10 +1003,8 @@ const AnalyticsDashboardPage = () => {
         if (!acctId) return;
         setSchemaSaving(true);
         try {
-            const userId = localStorage.getItem('userId');
-
-            // Always save under the current logged-in user's admin ID, never the dropdown-selected admin's ID
-            const adminId = localStorage.getItem('currentUserAdmin') || userId;
+            // Always save under the current logged-in user's lead-app userId.
+            const userId = rawUser?.userId || localStorage.getItem('userId');
 
             const schema = readStore();
             const acctKey = acctId || 'default';
@@ -1017,12 +1012,10 @@ const AnalyticsDashboardPage = () => {
             const viewingKey = viewingAs || 'default';
             const userSchema = schema[acctKey]?.[viewingKey] || { filters: [] };
 
-            // Always save under currentUserAdmin — never under the dropdown-selected admin
+            // Schemas are keyed by userId on the backend — save under the caller's userId.
             await api.post('/api/ui/analytics/save-schema', {
                 userId: userId,
                 acctId: acctId,
-                adminId: adminId,
-                viewingAs: adminId,
                 schema: userSchema
             });
 
@@ -1381,18 +1374,18 @@ const AnalyticsDashboardPage = () => {
     }, [acctId]);
 
     // Fetch admins for View As dropdown.
-    // Runs once per account. Matches the logged-in user by email, sets viewingAs to their
-    // Botamation adminId, then lets the chart-loading effect handle localStorage vs backend.
+    // Runs once per account. Identifies the logged-in user by their lead-app userId,
+    // sets viewingAs to that userId (the key AnalyticsSchema is stored under), then lets
+    // the chart-loading effect handle localStorage vs backend.
     useEffect(() => {
         if (!acctId) return;
 
         // Already loaded for this account — prevent double-run when userDetails updates
         if (adminsLoadedForAcctRef.current === acctId) return;
 
-        // We need the user's email to match against the admin list.
-        // It is written to localStorage by AuthContext immediately after auth/profile load.
-        const userEmail = (userDetails?.email || localStorage.getItem('userEmail') || '').trim().toLowerCase();
-        if (!userEmail) return; // wait — userDetails not ready yet, effect will re-run
+        // The canonical identity is the lead-app userId (admin records no longer store email).
+        const currentUserId = rawUser?.userId || localStorage.getItem('userId') || '';
+        if (!currentUserId) return; // wait — auth not ready yet, effect will re-run
 
         adminsLoadedForAcctRef.current = acctId; // mark as loaded for this account
 
@@ -1408,33 +1401,25 @@ const AnalyticsDashboardPage = () => {
                     return;
                 }
 
-                // Helper: find admin by Botamation chatbotAdminId (canonical key for AnalyticsSchema)
-                const findByPlatformId = (id) => id
-                    ? list.find(a => String(a.chatbotAdminId || a.adminId || a.id || a._id || '') === String(id))
+                // Helper: find admin by lead-app userId (canonical key for AnalyticsSchema)
+                const findByUserId = (id) => id
+                    ? list.find(a => String(a.userId || '') === String(id))
                     : null;
 
-                // Match the current user's admin record by email
-                const currentUserAdmin = list.find(
-                    a => (a.email || a.emailId || a.email_id || '').trim().toLowerCase() === userEmail
-                );
-
-                if (currentUserAdmin) {
-                    const platformAdminId = String(currentUserAdmin.chatbotAdminId || currentUserAdmin.adminId || currentUserAdmin.id || currentUserAdmin._id || '');
-                    if (platformAdminId) {
-                        localStorage.setItem('currentUserAdmin', platformAdminId);
-                    }
-                }
+                // The current user's own admin record
+                const currentUserAdmin = findByUserId(currentUserId);
+                localStorage.setItem('currentUserAdmin', currentUserId);
 
                 // Resolve which admin to select:
                 //   1. A previously persisted "View As" choice (different admin, stored per account)
-                //   2. Default to the current user's own admin
+                //   2. Default to the current user's own record
                 const storedViewingAs = localStorage.getItem(`analyticsViewingAs_${acctId}`);
                 let adminToSelect = null;
                 if (storedViewingAs) {
-                    adminToSelect = findByPlatformId(storedViewingAs);
+                    adminToSelect = findByUserId(storedViewingAs);
                 }
                 if (!adminToSelect) {
-                    adminToSelect = currentUserAdmin || findByPlatformId(localStorage.getItem('currentUserAdmin'));
+                    adminToSelect = currentUserAdmin || findByUserId(localStorage.getItem('currentUserAdmin'));
                 }
 
                 if (!adminToSelect) {
@@ -1445,11 +1430,11 @@ const AnalyticsDashboardPage = () => {
 
                 setViewAsAdmin(adminToSelect);
 
-                // Set viewingAs to the Botamation chatbotAdminId — this is the ONLY trigger for chart loading.
+                // Set viewingAs to the user's userId — this is the ONLY trigger for chart loading.
                 // The chart-loading effect [acctId, viewingAs] will fire next and:
                 //   - load from localStorage if a schema exists there (no backend call), or
                 //   - call handleSchemaSync (backend) if no localStorage schema exists.
-                const viewingAsId = String(adminToSelect.chatbotAdminId || adminToSelect.adminId || adminToSelect.id || adminToSelect._id || '');
+                const viewingAsId = String(adminToSelect.userId || '');
                 if (viewingAsId) {
                     setViewingAs(viewingAsId);
                 }
@@ -1458,7 +1443,7 @@ const AnalyticsDashboardPage = () => {
                 // Admins fetch failed — unblock the UI so it doesn't stay stuck on the loading mask
                 setChartsReady(true);
             });
-    }, [acctId, userDetails]);
+    }, [acctId, userDetails, rawUser]);
     // Handle View As selection change
     const handleViewAsChange = async (selectedAdmin) => {
         if (!acctId) {
@@ -1485,11 +1470,8 @@ const AnalyticsDashboardPage = () => {
         setChartsReady(false);
 
         try {
-            // Extract the selected user's ID — must be adminId (Botamation platform ID),
-            // which is the key used by AnalyticsSchema. Do NOT use _id (MongoDB _id).
-            const selectedUserId = selectedAdmin
-                ? (selectedAdmin.adminId || selectedAdmin.id || selectedAdmin._id || selectedAdmin.userId || selectedAdmin.authId || selectedAdmin.authUserId)
-                : null;
+            // Selected user's identity is the lead-app userId — the key AnalyticsSchema uses.
+            const selectedUserId = selectedAdmin ? (selectedAdmin.userId || null) : null;
 
             // Call backend with acctId, userId, and selectedUserId
             const response = await api.post('/api/ui/analytics/view-as', {
@@ -3343,9 +3325,7 @@ const AnalyticsDashboardPage = () => {
                                     setSaveWarningOpen(false);
                                     const ownKey = localStorage.getItem('currentUserAdmin') || localStorage.getItem('userId') || 'default';
                                     await executeSchemaSave(ownKey);
-                                    const ownAdmin = viewAsAdmins.find(a =>
-                                        (a._id || a.id || a.adminId || a.userId || a.authId || a.authUserId) === ownKey
-                                    );
+                                    const ownAdmin = viewAsAdmins.find(a => String(a.userId || '') === ownKey);
                                     if (ownAdmin) {
                                         await handleViewAsChange(ownAdmin);
                                     }
@@ -3554,17 +3534,17 @@ const AnalyticsDashboardPage = () => {
                                         <div className="absolute right-0 top-full mt-1 min-w-full w-max bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 max-h-64 overflow-y-auto">
                                             {(() => {
                                                 const currentUserAdminId = localStorage.getItem('currentUserAdmin');
-                                                const me = viewAsAdmins.find(a => String(a.adminId || a.id || a._id || '') === currentUserAdminId);
-                                                const others = viewAsAdmins.filter(a => String(a.adminId || a.id || a._id || '') !== currentUserAdminId);
+                                                const me = viewAsAdmins.find(a => String(a.userId || '') === currentUserAdminId);
+                                                const others = viewAsAdmins.filter(a => String(a.userId || '') !== currentUserAdminId);
 
                                                 const renderAdminBtn = (admin, idx) => {
-                                                    const adminPlatformId = String(admin.adminId || admin.id || admin._id || '');
-                                                    const selectedPlatformId = String(viewAsAdmin?.adminId || viewAsAdmin?.id || viewAsAdmin?._id || '');
-                                                    const isSelected = adminPlatformId && adminPlatformId === selectedPlatformId;
-                                                    const isMe = adminPlatformId === currentUserAdminId;
+                                                    const adminUserId = String(admin.userId || '');
+                                                    const selectedUserId = String(viewAsAdmin?.userId || '');
+                                                    const isSelected = adminUserId && adminUserId === selectedUserId;
+                                                    const isMe = adminUserId === currentUserAdminId;
                                                     return (
                                                         <button
-                                                            key={admin.adminId || admin._id || idx}
+                                                            key={admin.userId || admin._id || idx}
                                                             onClick={() => !isSelected && handleViewAsChange(admin)}
                                                             disabled={isSelected}
                                                             className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors

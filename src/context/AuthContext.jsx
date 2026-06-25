@@ -25,43 +25,42 @@ function saveChatbotAdminToStorage(obj) {
 }
 
 /**
- * Fetch the account_admins list for `acctId`, find the record matching
- * `email`, and persist the chatbot admin identity to localStorage + state.
+ * Fetch the account_admins list for `acctId`, find the record for the logged-in
+ * `userId`, and persist the admin display identity to localStorage + state.
  *
  * Call this on: login, page refresh, account switch, admin list refresh.
  *
  * @param {string}   acctId
- * @param {string}   email           - logged-in user's email
+ * @param {string}   userId          - logged-in user's lead-app userId
  * @param {function} setChatbotAdmin - state setter from AuthContext
  * @param {function} setAdminId      - state setter from AuthContext
- * @returns {object|null}            - the chatbotAdmin data object, or null
+ * @returns {object|null}            - the chatbotAdmin display data object, or null
  */
-export async function resolveChatbotAdmin(acctId, email, setChatbotAdmin, setAdminId) {
-    if (!acctId || !email) return null;
+export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId) {
+    if (!acctId || !userId) return null;
     try {
         const res = await api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } });
         const raw = res.data;
         const adminList = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
 
-        const userEmail    = email.trim().toLowerCase();
-        const matchedAdmin = adminList.find(
-            a => (a.email || '').trim().toLowerCase() === userEmail
-        );
+        const matchedAdmin = adminList.find(a => String(a.userId || '') === String(userId));
 
         if (!matchedAdmin?._id) return null;
 
-        // Persist account_admins._id
-        localStorage.setItem(LS_ADMIN_ID, matchedAdmin._id);
-        setAdminId?.(matchedAdmin._id);
+        // Persist the lead-app userId as the canonical identity
+        localStorage.setItem(LS_ADMIN_ID, matchedAdmin.userId);
+        setAdminId?.(matchedAdmin.userId);
 
         // Build display name
         const name = [matchedAdmin.firstName || '', matchedAdmin.lastName || '']
-            .filter(Boolean).join(' ') || matchedAdmin.email || '';
+            .filter(Boolean).join(' ') || '';
 
         const data = {
             name,
             profileImageUrl: matchedAdmin.profileImage || '',
             chatbotAdminId:  matchedAdmin.chatbotAdminId || '',
+            userId:          matchedAdmin.userId || '',
+            accessLevel:     matchedAdmin.accessLevel || '',
         };
 
         saveChatbotAdminToStorage(data);
@@ -79,7 +78,9 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);      // Auth check in progress
     const [authenticated, setAuthenticated] = useState(false); // Is session valid?
     const [adminViewActive, setAdminViewActive] = useState(false); // True when viewing as an admin
-    const [adminId, setAdminId] = useState(null);      // account_admins._id for the logged-in user
+    const [adminId, setAdminId] = useState(null);      // lead-app userId for the logged-in admin
+    const [accessLevel, setAccessLevel] = useState(null); // 'superadmin' | 'admin' | null (not an admin)
+    const [adminResolved, setAdminResolved] = useState(false); // true once the admin lookup has completed
     /**
      * chatbotAdmin — the account_admins record for the logged-in user.
      * Persisted to localStorage so it's available instantly on next page load
@@ -177,6 +178,8 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setUserDetails(null);
         setAdminId(null);
+        setAccessLevel(null);
+        setAdminResolved(false);
         setChatbotAdmin(null);
 
         // 2. Tell the backend to clear the server-side cookie
@@ -207,7 +210,11 @@ export const AuthProvider = ({ children }) => {
             setUserDetails,
             adminId,
             setAdminId,
-            chatbotAdmin,    // { name, profileImageUrl, chatbotAdminId } — persisted to localStorage
+            accessLevel,        // 'superadmin' | 'admin' | null
+            setAccessLevel,
+            adminResolved,      // true once the per-account admin lookup completed
+            setAdminResolved,
+            chatbotAdmin,    // { name, profileImageUrl, chatbotAdminId, userId, accessLevel } — persisted to localStorage
             setChatbotAdmin,
             adminViewActive,
             setAdminViewActive,

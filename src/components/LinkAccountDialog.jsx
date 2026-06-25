@@ -33,12 +33,15 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
         try {
             const userId = user?.userId || localStorage.getItem('userId') || '';
             const userEmail = userDetails?.email || user?.email || '';
+            const userPhone = userDetails?.phone || '';
 
-            // Verify the account number against the lead-management backend
+            // Verify the account number against the lead-management backend.
+            // email/phone seed the admin record's contact details from the user profile.
             const response = await api.post('/api/ui/accounts/verify', {
                 acctNo: acctNo.trim(),
                 userId,
                 email: userEmail,
+                phone: userPhone,
             });
 
             const data = response.data;

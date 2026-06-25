@@ -5,17 +5,17 @@
  *
  * Fields:
  *   - description (required)
- *   - date + time — two separate styled inputs
+ *   - date + time — prefilled to next day 10 AM
  *   - preReminderEnabled — toggle; reveals value + unit selectors
  *   - channels — pill toggles: inApp, push, email, whatsapp (requires phone)
- *
- * Push channel: when selected, checks browser push permission.
- * Shows an inline banner to prompt the user to enable it if needed.
+ *   - clientReminderEnabled — toggle; reveals client-specific message, date/time, and channels
  */
 import React, { useState, useEffect } from 'react';
 import { remindersApi } from '../api/remindersApi';
 import { pushApi }      from '../api/pushApi';
 import { Dropdown, DropdownItem } from './ui/Dropdown';
+import DatePicker from './ui/DatePicker';
+import TimePicker from './ui/TimePicker';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,12 @@ const CHANNELS = [
     { id: 'push',     label: 'Push',     requiresPhone: false },
     { id: 'email',    label: 'Email',    requiresPhone: false },
     { id: 'whatsapp', label: 'WhatsApp', requiresPhone: true  },
+];
+
+const CLIENT_CHANNELS = [
+    { id: 'email',    label: 'Email',    requiresEmail: true,  requiresPhone: false },
+    { id: 'whatsapp', label: 'WhatsApp', requiresEmail: false, requiresPhone: true  },
+    { id: 'sms',      label: 'SMS',      requiresEmail: false, requiresPhone: true  },
 ];
 
 const PRE_UNITS = [
@@ -52,6 +58,17 @@ function todayStr() {
     const d   = new Date();
     const pad = n => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+/** Returns { date, time } for tomorrow at 10:00 AM */
+function nextDayAt10AM() {
+    const d   = new Date();
+    d.setDate(d.getDate() + 1);
+    const pad = n => String(n).padStart(2, '0');
+    return {
+        date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()),
+        time: '10:00',
+    };
 }
 
 // ── Small SVG helpers ─────────────────────────────────────────────────────────
@@ -111,7 +128,6 @@ function PushBanner({ state, onEnable }) {
             alignItems:   'flex-start',
             gap:          'var(--space-2)',
         }}>
-            {/* Bell icon */}
             <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"
                 style={{ flexShrink: 0, color: 'var(--color-primary-600)', marginTop: '1px' }}>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -152,17 +168,26 @@ function PushBanner({ state, onEnable }) {
  * @param {string}        acctId         - The account ID (forwarded as query param)
  * @param {object|null}   reminder       - Existing reminder to edit (null = create)
  * @param {boolean}       adminHasPhone  - Whether the current admin has a phone number
+ * @param {string}        leadName       - Lead's name (for client reminder preview)
+ * @param {string}        leadPhone      - Lead's phone (for client reminder preview)
+ * @param {string}        leadEmail      - Lead's email (for client reminder preview)
  * @param {function}      onSaved(rem)   - Called with the saved reminder object
  * @param {function}      onCancel       - Called when the user dismisses the form
  * @param {function}      onError(msg)   - Called with an error message string
  */
-export default function AddReminderForm({ leadId, acctId, adminId, reminder, adminHasPhone, onSaved, onCancel, onError }) {
+export default function AddReminderForm({
+    leadId, acctId, adminId, reminder, adminHasPhone,
+    leadName = '', leadPhone = '', leadEmail = '',
+    onSaved, onCancel, onError
+}) {
     const isEdit    = Boolean(reminder);
     const initSplit = splitDatetime(reminder?.scheduledAt);
+    const defaults  = nextDayAt10AM();
 
+    // ── Admin reminder state ──────────────────────────────────────────────────
     const [description,    setDescription]    = useState(reminder?.description || '');
-    const [schedDate,      setSchedDate]      = useState(initSplit.date);
-    const [schedTime,      setSchedTime]      = useState(initSplit.time);
+    const [schedDate,      setSchedDate]      = useState(isEdit ? initSplit.date : defaults.date);
+    const [schedTime,      setSchedTime]      = useState(isEdit ? initSplit.time : defaults.time);
     const [preEnabled,     setPreEnabled]     = useState(reminder?.preReminderEnabled || false);
     const [preValue,       setPreValue]       = useState(reminder?.preReminderValue || 30);
     const [preUnit,        setPreUnit]        = useState(reminder?.preReminderUnit || 'minutes');
@@ -173,27 +198,36 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
     /** null | 'prompt' | 'denied' | 'requesting' */
     const [pushState, setPushState] = useState(null);
 
-    // ── On mount: if push is in the default channels, silently check permission ─
-    // This shows the inline banner immediately when the form opens, so the user
-    // doesn't have to toggle push off then on to see the prompt.
+    // ── Client reminder state ─────────────────────────────────────────────────
+    const clientInitSplit = splitDatetime(reminder?.clientScheduledAt);
+    const [clientEnabled,   setClientEnabled]   = useState(reminder?.clientReminderEnabled || false);
+    const [clientMessage,   setClientMessage]   = useState(reminder?.clientMessage || '');
+    const [clientDate,      setClientDate]      = useState(
+        (isEdit && reminder?.clientScheduledAt) ? clientInitSplit.date : defaults.date
+    );
+    const [clientTime,      setClientTime]      = useState(
+        (isEdit && reminder?.clientScheduledAt) ? clientInitSplit.time : defaults.time
+    );
+    const [clientChannels,  setClientChannels]  = useState(reminder?.clientChannels || []);
+
+    // ── On mount: check push permission silently ──────────────────────────────
     useEffect(() => {
         if (!activeChannels.includes('push')) return;
         pushApi.ensureSubscribed().then(result => {
-            if (result.ok)                    setPushState(null);
-            else if (result.reason === 'prompt')  setPushState('prompt');
-            else if (result.reason === 'denied')  setPushState('denied');
+            if (result.ok)                            setPushState(null);
+            else if (result.reason === 'prompt')      setPushState('prompt');
+            else if (result.reason === 'denied')      setPushState('denied');
             else if (result.reason === 'unsupported') {
                 setActiveChannels(prev => prev.filter(c => c !== 'push'));
             }
         });
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ── Channel toggle ────────────────────────────────────────────────────────
+    // ── Channel toggle (admin) ────────────────────────────────────────────────
     const toggleChannel = async (id) => {
         const wasActive = activeChannels.includes(id);
         setActiveChannels(prev => wasActive ? prev.filter(c => c !== id) : [...prev, id]);
 
-        // When enabling the Push channel, verify push permission / subscription
         if (id === 'push' && !wasActive) {
             const result = await pushApi.ensureSubscribed();
             if (result.ok) {
@@ -203,32 +237,27 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
             } else if (result.reason === 'denied') {
                 setPushState('denied');
             } else if (result.reason === 'unsupported') {
-                // Browser doesn't support push — silently remove the channel
                 setActiveChannels(prev => prev.filter(c => c !== 'push'));
             }
-            // 'error' — leave selected but don't show banner (transient failure)
         }
 
-        // Clear push banner when disabling push
-        if (id === 'push' && wasActive) {
-            setPushState(null);
-        }
+        if (id === 'push' && wasActive) setPushState(null);
     };
 
-    // ── Enable push flow (banner button click) ────────────────────────────────
     const handleEnablePush = async () => {
-        if (!('Notification' in window)) {
-            setPushState('denied');
-            return;
-        }
+        if (!('Notification' in window)) { setPushState('denied'); return; }
         setPushState('requesting');
         const perm = await Notification.requestPermission();
-        if (perm !== 'granted') {
-            setPushState('denied');
-            return;
-        }
+        if (perm !== 'granted') { setPushState('denied'); return; }
         const result = await pushApi.ensureSubscribed();
         setPushState(result.ok ? null : 'denied');
+    };
+
+    // ── Client channel toggle ─────────────────────────────────────────────────
+    const toggleClientChannel = (id) => {
+        setClientChannels(prev =>
+            prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+        );
     };
 
     // ── Submit ────────────────────────────────────────────────────────────────
@@ -241,6 +270,31 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
         if (isNaN(scheduled.getTime())) { setFieldError('Invalid date or time.'); return; }
         if (scheduled <= new Date())    { setFieldError('Scheduled time must be in the future.'); return; }
 
+        // Validate client reminder
+        if (clientEnabled) {
+            if (!clientMessage.trim()) {
+                setFieldError('Client message is required.');
+                return;
+            }
+            if (!clientDate || !clientTime) {
+                setFieldError('Client reminder date and time are required.');
+                return;
+            }
+            const clientScheduled = new Date(clientDate + 'T' + clientTime);
+            if (isNaN(clientScheduled.getTime())) {
+                setFieldError('Invalid client reminder date or time.');
+                return;
+            }
+            if (clientScheduled <= new Date()) {
+                setFieldError('Client reminder time must be in the future.');
+                return;
+            }
+            if (clientChannels.length === 0) {
+                setFieldError('Select at least one channel for the client reminder.');
+                return;
+            }
+        }
+
         setSaving(true);
         setFieldError('');
         try {
@@ -251,9 +305,14 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                 preReminderValue:   preEnabled ? Number(preValue) : undefined,
                 preReminderUnit:    preEnabled ? preUnit : undefined,
                 channels:           activeChannels,
-                // On edit use the record's own adminId (ownership check in backend).
-                // On create use the current user's adminId.
                 adminId:            reminder?.adminId || adminId,
+                // Client reminder
+                clientReminderEnabled: clientEnabled,
+                ...(clientEnabled && {
+                    clientMessage:     clientMessage.trim(),
+                    clientScheduledAt: new Date(clientDate + 'T' + clientTime).toISOString(),
+                    clientChannels,
+                }),
             };
             const res = isEdit
                 ? await remindersApi.update(leadId, reminder._id, data, acctId)
@@ -299,44 +358,26 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                     />
                 </div>
 
-                {/* Remind at — date + time as two separate styled inputs */}
+                {/* Remind at — date + time */}
                 <div>
                     <label className="add-reminder-form__label">
                         Remind at <span style={{ color: 'var(--color-danger-500)' }}>*</span>
                     </label>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        {/* Date picker */}
                         <div style={{ flex: 1 }}>
                             <label style={subLabelStyle}>Date</label>
-                            <div className="add-reminder-form__datetime-wrap">
-                                <svg className="add-reminder-form__datetime-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <input
-                                    type="date"
-                                    className="add-reminder-form__input add-reminder-form__datetime-input"
-                                    value={schedDate}
-                                    min={todayStr()}
-                                    onChange={e => setSchedDate(e.target.value)}
-                                />
-                            </div>
+                            <DatePicker
+                                value={schedDate}
+                                onChange={setSchedDate}
+                                min={todayStr()}
+                            />
                         </div>
-                        {/* Time picker */}
                         <div style={{ width: '110px', flexShrink: 0 }}>
                             <label style={subLabelStyle}>Time</label>
-                            <div className="add-reminder-form__datetime-wrap">
-                                <svg className="add-reminder-form__datetime-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <input
-                                    type="time"
-                                    className="add-reminder-form__input add-reminder-form__datetime-input"
-                                    value={schedTime}
-                                    onChange={e => setSchedTime(e.target.value)}
-                                />
-                            </div>
+                            <TimePicker
+                                value={schedTime}
+                                onChange={setSchedTime}
+                            />
                         </div>
                     </div>
                 </div>
@@ -356,8 +397,6 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
 
                     {preEnabled && (
                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'flex-end' }}>
-
-                            {/* Amount */}
                             <div style={{ width: '72px', flexShrink: 0 }}>
                                 <label style={subLabelStyle}>Amount</label>
                                 <input
@@ -371,8 +410,7 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                                 />
                             </div>
 
-                            {/* Unit — app Dropdown for consistent indigo theme */}
-                            <div style={{ flex: 1 }}>
+                            <div style={{ width: '108px', flexShrink: 0 }}>
                                 <label style={subLabelStyle}>Unit</label>
                                 <Dropdown
                                     portal
@@ -413,7 +451,7 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                     )}
                 </div>
 
-                {/* Notify via channels */}
+                {/* Notify via channels (admin) */}
                 <div>
                     <label className="add-reminder-form__label">Notify via</label>
                     <div className="add-reminder-form__channels">
@@ -441,9 +479,108 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                             );
                         })}
                     </div>
-
-                    {/* Push permission banner — shown when push is selected but permission is missing */}
                     <PushBanner state={pushState} onEnable={handleEnablePush} />
+                </div>
+
+                {/* ── Divider ── */}
+                <div style={{ borderTop: '1px dashed var(--color-border)' }} />
+
+                {/* Client Reminder toggle */}
+                <div>
+                    <label className="add-reminder-form__label">Client Reminder</label>
+                    <div
+                        className="add-reminder-form__toggle-row"
+                        onClick={() => setClientEnabled(v => !v)}
+                    >
+                        <div className={'add-reminder-form__toggle' + (clientEnabled ? ' add-reminder-form__toggle--on' : '')} />
+                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+                            {clientEnabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                    </div>
+
+                    {clientEnabled && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', marginTop: '0.75rem' }}>
+
+                            {/* Contact info preview */}
+                            {(leadName || leadPhone || leadEmail) && (
+                                <div className="add-reminder-form__client-info">
+                                    {leadName  && <span>&#128100; {leadName}</span>}
+                                    {leadPhone && <span>&#128222; {leadPhone}</span>}
+                                    <span style={{ color: leadEmail ? 'inherit' : 'var(--color-text-muted)' }}>
+                                        &#9993; {leadEmail || 'No email on file'}
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Message */}
+                            <div>
+                                <label style={subLabelStyle}>
+                                    Message <span style={{ color: 'var(--color-danger-500)' }}>*</span>
+                                </label>
+                                <textarea
+                                    className="add-reminder-form__textarea"
+                                    placeholder="Your message to the client…"
+                                    value={clientMessage}
+                                    onChange={e => setClientMessage(e.target.value)}
+                                />
+                            </div>
+
+                            {/* Send at — date + time */}
+                            <div>
+                                <label style={subLabelStyle}>
+                                    Send at <span style={{ color: 'var(--color-danger-500)' }}>*</span>
+                                </label>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <div style={{ flex: 1 }}>
+                                        <DatePicker
+                                            value={clientDate}
+                                            onChange={setClientDate}
+                                            min={todayStr()}
+                                        />
+                                    </div>
+                                    <div style={{ width: '110px', flexShrink: 0 }}>
+                                        <TimePicker
+                                            value={clientTime}
+                                            onChange={setClientTime}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Notify client via */}
+                            <div>
+                                <label style={subLabelStyle}>Notify via</label>
+                                <div className="add-reminder-form__channels">
+                                    {CLIENT_CHANNELS.map(ch => {
+                                        const disabled = (ch.requiresEmail && !leadEmail) || (ch.requiresPhone && !leadPhone);
+                                        const active   = !disabled && clientChannels.includes(ch.id);
+                                        const title    = ch.requiresEmail && !leadEmail ? 'No email on file for this lead'
+                                                       : ch.requiresPhone && !leadPhone ? 'No phone on file for this lead'
+                                                       : undefined;
+                                        return (
+                                            <div
+                                                key={ch.id}
+                                                className={[
+                                                    'add-reminder-form__channel-option',
+                                                    active   ? 'add-reminder-form__channel-option--active'   : '',
+                                                    disabled ? 'add-reminder-form__channel-option--disabled' : '',
+                                                ].filter(Boolean).join(' ')}
+                                                onClick={() => !disabled && toggleClientChannel(ch.id)}
+                                                title={title}
+                                            >
+                                                {active && (
+                                                    <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                )}
+                                                {ch.label}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Validation error */}
@@ -465,7 +602,18 @@ export default function AddReminderForm({ leadId, acctId, adminId, reminder, adm
                 </button>
                 <button
                     onClick={handleSubmit}
-                    disabled={saving || !description.trim() || !schedDate || !schedTime}
+                    disabled={
+                        saving ||
+                        !description.trim() ||
+                        !schedDate ||
+                        !schedTime ||
+                        (clientEnabled && (
+                            !clientMessage.trim() ||
+                            !clientDate ||
+                            !clientTime ||
+                            clientChannels.length === 0
+                        ))
+                    }
                     className="btn btn--primary btn--sm"
                 >
                     {saving ? 'Saving…' : isEdit ? 'Update' : 'Set Reminder'}
