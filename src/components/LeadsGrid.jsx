@@ -802,6 +802,87 @@ const FormFieldInput = ({ type, value, onChange, disabled }) => {
 };
 
 
+// ── Responsible filter dropdown (toolbar — superadmin only) ───────────────────
+
+const ResponsibleFilterDropdown = ({ admins, value, onChange }) => {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef(null);
+
+    React.useEffect(() => {
+        const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, []);
+
+    const selected = admins.find(a => a.userId === value) || null;
+
+    const renderAvatar = (a) => {
+        const name = adminDisplayName(a);
+        return a.profileImage
+            ? <img src={a.profileImage} alt="" className="w-4 h-4 rounded-full object-cover border border-gray-200" onError={e => { e.target.style.display = 'none'; }} />
+            : <span className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold text-[8px] select-none shrink-0" style={{ backgroundColor: twoLetterColor(name) }}>{name.charAt(0).toUpperCase()}</span>;
+    };
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className={`h-8 px-2.5 flex items-center gap-1.5 text-xs rounded-lg border transition-all ${value ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-semibold' : 'bg-white border-gray-300 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50'}`}
+            >
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                {value === '__unassigned__' ? (
+                    <span className="truncate">Unassigned</span>
+                ) : selected ? (
+                    <span className="flex items-center gap-1 max-w-[90px]">
+                        {renderAvatar(selected)}
+                        <span className="truncate">{adminDisplayName(selected)}</span>
+                    </span>
+                ) : (
+                    <span className="text-gray-400">All Admins</span>
+                )}
+                <svg className={`w-3 h-3 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {open && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[160px] max-h-60 overflow-y-auto py-1">
+                    <button
+                        type="button"
+                        onClick={() => { onChange(''); setOpen(false); }}
+                        className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${!value ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-600'}`}
+                    >
+                        <span className="w-4 h-4 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-[9px] shrink-0">∅</span>
+                        All Admins
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => { onChange('__unassigned__'); setOpen(false); }}
+                        className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${value === '__unassigned__' ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-600'}`}
+                    >
+                        <span className="w-4 h-4 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-[9px] shrink-0">—</span>
+                        Unassigned
+                    </button>
+                    {admins.map(a => (
+                        <button
+                            key={a.userId}
+                            type="button"
+                            onClick={() => { onChange(a.userId); setOpen(false); }}
+                            className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${value === a.userId ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-700'}`}
+                        >
+                            {renderAvatar(a)}
+                            <span className="truncate">{adminDisplayName(a)}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+
 // ── Main LeadsGrid component ───────────────────────────────────────────────────
 
 const LeadsGrid = () => {
@@ -809,7 +890,7 @@ const LeadsGrid = () => {
     const location                             = useLocation();
     const { showSuccess, showError, showWarning, showReminder, NotificationComponent } = useNotifications();
     const { acctNo, acctId, isAccountLinked, accountsLoaded, accountsLoading, setIsLinkDialogOpen } = useAccount();
-    const { userDetails, chatbotAdmin, user: rawUser } = useAuth();
+    const { userDetails, chatbotAdmin, user: rawUser, accessLevel } = useAuth();
 
     // ── Current user identity ─────────────────────────────────────────────────
     // Notes, reminders and the bell/SSE stream are all keyed by the lead-app userId.
@@ -818,8 +899,11 @@ const LeadsGrid = () => {
 
     // Admin identity + access level are resolved centrally in AccountContext.
 
+    const isSuperAdmin = accessLevel === 'superadmin';
+
     // ── Admins for the Responsible dropdown ───────────────────────────────────
     const [adminsList, setAdminsList] = useState([]);
+    const [responsibleFilter, setResponsibleFilter] = useState('');
     useEffect(() => {
         if (!acctId) { setAdminsList([]); return; }
         api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } })
@@ -1041,7 +1125,8 @@ const LeadsGrid = () => {
                 acctId,
                 ...(selectedCategory  && { categoryId: selectedCategory }),
                 ...(sortField         && { sortBy: sortField, sortOrder }),
-                ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) })
+                ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) }),
+                ...(isSuperAdmin && responsibleFilter && { responsibleFilter })
             };
 
             const res = await api.get('/api/ui/leads', { params });
@@ -1069,7 +1154,7 @@ const LeadsGrid = () => {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, categoriesReady, columnDefsReady, selectedCategory]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, categoriesReady, columnDefsReady, selectedCategory, responsibleFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -1213,11 +1298,13 @@ const LeadsGrid = () => {
             if (prev.categoryId) updated.categoryId = prev.categoryId;
             return updated;
         });
+        setResponsibleFilter('');
         setCurrentPage(1);
     };
 
     const activeFilterCount = Object.entries(appliedFilters)
-        .filter(([k, v]) => k !== 'categoryId' && isFilterActive(v)).length;
+        .filter(([k, v]) => k !== 'categoryId' && isFilterActive(v)).length
+        + (isSuperAdmin && responsibleFilter ? 1 : 0);
 
     const hasAnyFilter = activeFilterCount > 0 ||
         Object.values(filters).some(v => isFilterActive(v));
@@ -1523,6 +1610,18 @@ const LeadsGrid = () => {
                             </div>
 
                             <div className="w-px h-6 bg-gray-200 mx-1.5" />
+
+                            {/* Group 1b: Responsible filter — superadmins only */}
+                            {isSuperAdmin && adminsList.length > 0 && (
+                                <>
+                                    <ResponsibleFilterDropdown
+                                        admins={adminsList}
+                                        value={responsibleFilter}
+                                        onChange={(v) => { setResponsibleFilter(v); setCurrentPage(1); }}
+                                    />
+                                    <div className="w-px h-6 bg-gray-200 mx-1.5" />
+                                </>
+                            )}
 
                             {/* Group 2a: Filter controls */}
                             <div className="flex items-center gap-1.5">
@@ -1888,7 +1987,7 @@ const LeadsGrid = () => {
             {/* Filter popup */}
             {showFilterPopup && (
                 <FilterPopup
-                    fields={fields}
+                    fields={fields.filter(f => f !== 'responsible')}
                     columnDefMap={columnDefMap}
                     filters={filters}
                     onFilterChange={handleFilterChange}
