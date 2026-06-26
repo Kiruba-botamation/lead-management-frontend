@@ -438,7 +438,10 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
     const fetchLeadsData = async () => {
         setLoading(true);
         try {
-            const params = { limit: 1000, ...(acctId && { acctId }) };
+            // Scope to the active category so the axis options include that
+            // category's custom fields (plus the system + stage fields).
+            const categoryId = acctId ? (() => { try { const s = localStorage.getItem('selectedCategory'); const p = s ? JSON.parse(s) : {}; return (p && typeof p === 'object' && !Array.isArray(p)) ? (p[acctId] ?? null) : null; } catch { return null; } })() : null;
+            const params = { limit: 1000, ...(acctId && { acctId }), ...(categoryId && { categoryId }) };
             const response = await api.get('/api/ui/leads', { params });
             setLeads(response.data.data || []);
 

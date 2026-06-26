@@ -69,7 +69,11 @@ const tint = (hex, ratio = 0.16) => {
 };
 
 /** Fields that are framework-internal and never rendered as grid columns */
-const EXCLUDE_FROM_GRID = new Set(['__v', '_id', 'acctId', 'categoryId', 'adminName', 'adminProfileImage']);
+const EXCLUDE_FROM_GRID = new Set(['__v', '_id', 'acctId', 'categoryId', 'adminName', 'adminProfileImage', 'stage']);
+
+/** Fixed width (px) reserved for the pinned Responsible column so the pinned
+ *  Stage column can be offset by exactly this amount. */
+const RESP_PIN_W = 150;
 
 /** Trailing columns always appended after category-defined fields */
 const TRAILING_FIELDS = ['createdAt', 'updatedAt'];
@@ -718,7 +722,49 @@ const ResponsibleSelect = ({ admins, value, onChange, disabled }) => {
     );
 };
 
-const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditForm, onSave, onCancel, isSaving, admins }) => {
+/** Stage picker for the edit panel — mirrors ResponsibleSelect but uses the
+ *  admin-chosen stage colours. `stages` is [{ id, name, color }]. */
+const StageSelect = ({ stages, value, onChange, disabled }) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDocClick);
+        return () => document.removeEventListener('mousedown', onDocClick);
+    }, []);
+
+    const selected = stages.find(s => String(s.id) === String(value)) || null;
+    const swatch = (color) => <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />;
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setOpen(o => !o)}
+                className="ds-input ds-input--sm w-full flex items-center justify-between gap-2 text-left disabled:opacity-50"
+            >
+                <span className="flex items-center gap-1.5 min-w-0">
+                    {selected ? (<>{swatch(selected.color)}<span className="truncate">{selected.name}</span></>) : <span className="text-gray-400">None</span>}
+                </span>
+                <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {open && (
+                <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl py-1">
+                    {stages.map(s => (
+                        <button key={s.id} type="button" onClick={() => { onChange(s.id); setOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${String(value) === String(s.id) ? 'bg-indigo-50' : ''}`}>
+                            {swatch(s.color)}
+                            <span className="truncate text-gray-700">{s.name}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditForm, onSave, onCancel, isSaving, admins, stages = [] }) => {
     const isEditFormDirty = editLead
         ? Object.keys(editForm).some(k => {
             const orig = editLead[k] == null ? '' : String(editLead[k]);
@@ -729,7 +775,7 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
 
     return (
         <div className="w-full sm:w-[calc(33.333%-0.5rem)] bg-white border border-gray-300 rounded-lg shadow-sm relative flex flex-col h-full overflow-hidden">
-            <div className="flex items-center justify-between gap-2 p-4 pb-3 border-b border-gray-200 shrink-0">
+            <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3 border-b border-gray-200 shrink-0">
                 <h3 className="text-xs font-bold text-gray-700">
                     {editLead ? 'Edit Lead' : 'Add New Lead'}
                 </h3>
@@ -742,9 +788,35 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
                     </Button>
                 </div>
             </div>
+            {(editFields.includes('responsible') || stages.length > 0) && (
+                <div className="px-4 py-3 bg-indigo-50 border-b-2 border-indigo-200 shrink-0 flex gap-3">
+                    {editFields.includes('responsible') && (
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-1.5">Assigned To</p>
+                            <ResponsibleSelect
+                                admins={admins}
+                                value={editForm['responsible'] ?? ''}
+                                onChange={v => setEditForm(prev => ({ ...prev, responsible: v }))}
+                                disabled={isSaving}
+                            />
+                        </div>
+                    )}
+                    {stages.length > 0 && (
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-1.5">Stage</p>
+                            <StageSelect
+                                stages={stages}
+                                value={editForm['stage'] ?? ''}
+                                onChange={v => setEditForm(prev => ({ ...prev, stage: v }))}
+                                disabled={isSaving}
+                            />
+                        </div>
+                    )}
+                </div>
+            )}
             <div className="flex-1 overflow-y-auto p-4">
                 <div className="grid grid-cols-1 gap-4">
-                    {editFields.map(fieldKey => {
+                    {editFields.filter(fieldKey => fieldKey !== 'responsible' && fieldKey !== 'stage').map(fieldKey => {
                         const colDef = columnDefMap.get(fieldKey);
                         const label  = colDef?.label || SYSTEM_LABELS[fieldKey] || fieldKey;
                         const type   = colDef?.type || 'text';
@@ -752,23 +824,14 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
                         return (
                             <div key={fieldKey}>
                                 <label className="block text-xs font-semibold text-gray-700 mb-1">
-                                    {fieldKey === 'responsible' ? 'Responsible' : label}
+                                    {label}
                                 </label>
-                                {fieldKey === 'responsible' ? (
-                                    <ResponsibleSelect
-                                        admins={admins}
-                                        value={editForm[fieldKey] ?? ''}
-                                        onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
-                                        disabled={isSaving}
-                                    />
-                                ) : (
-                                    <FormFieldInput
-                                        type={type}
-                                        value={editForm[fieldKey] ?? ''}
-                                        onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
-                                        disabled={isSaving}
-                                    />
-                                )}
+                                <FormFieldInput
+                                    type={type}
+                                    value={editForm[fieldKey] ?? ''}
+                                    onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
+                                    disabled={isSaving}
+                                />
                             </div>
                         );
                     })}
@@ -883,6 +946,71 @@ const ResponsibleFilterDropdown = ({ admins, value, onChange }) => {
 };
 
 
+// ── Stage filter dropdown (toolbar — available to all users) ──────────────────
+
+const StageFilterDropdown = ({ stages, value, onChange }) => {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef(null);
+
+    React.useEffect(() => {
+        const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, []);
+
+    const selected = stages.find(s => String(s.id) === String(value)) || null;
+    const swatch = (color, size = 'w-3 h-3') => <span className={`${size} rounded-full shrink-0`} style={{ backgroundColor: color }} />;
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className={`h-8 px-2.5 flex items-center gap-1.5 text-xs rounded-lg border transition-all ${value ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-semibold' : 'bg-white border-gray-300 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50'}`}
+            >
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h10M7 17h6" />
+                </svg>
+                {selected ? (
+                    <span className="flex items-center gap-1 max-w-[100px]">
+                        {swatch(selected.color)}
+                        <span className="truncate">{selected.name}</span>
+                    </span>
+                ) : (
+                    <span className="text-gray-400">All Stages</span>
+                )}
+                <svg className={`w-3 h-3 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {open && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[160px] max-h-60 overflow-y-auto py-1">
+                    <button
+                        type="button"
+                        onClick={() => { onChange(''); setOpen(false); }}
+                        className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${!value ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-600'}`}
+                    >
+                        <span className="w-3 h-3 rounded-full border border-dashed border-gray-300 shrink-0" />
+                        All Stages
+                    </button>
+                    {stages.map(s => (
+                        <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => { onChange(String(s.id)); setOpen(false); }}
+                            className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${String(value) === String(s.id) ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-700'}`}
+                        >
+                            {swatch(s.color)}
+                            <span className="truncate">{s.name}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+
 // ── Main LeadsGrid component ───────────────────────────────────────────────────
 
 const LeadsGrid = () => {
@@ -967,6 +1095,15 @@ const LeadsGrid = () => {
     // ── Column drag state ─────────────────────────────────────────────────────
     const [activeColId, setActiveColId] = useState(null);
     const [colWidths, setColWidths]         = useState({});
+
+    // ── Stage state (per selected category) ───────────────────────────────────
+    const [stages,      setStages]      = useState([]);   // [{ id, name, color, order }]
+    const [stageFilter, setStageFilter] = useState('');   // selected stage id (string) or ''
+    const stageMap = React.useMemo(() => {
+        const m = new Map();
+        stages.forEach(s => m.set(s.id, s));
+        return m;
+    }, [stages]);
 
     // ── Category state ────────────────────────────────────────────────────────
     const [categories,           setCategories]           = useState([]);
@@ -1063,6 +1200,7 @@ const LeadsGrid = () => {
             const allFields = [...catFields, ...TRAILING_FIELDS];
 
             setColumnDefs(data.fields || []);
+            setStages(data.stages || []);
 
             // Apply saved column order, then restore visibility
             // Always enforce TRAILING_FIELDS at the very end regardless of saved order
@@ -1118,6 +1256,10 @@ const LeadsGrid = () => {
                 if (key === 'categoryId') continue;
                 if (isFilterActive(def)) activeFilters[key] = def;
             }
+            // Stage filter (from the toolbar menu) is applied as a typed number-eq filter.
+            if (stageFilter) {
+                activeFilters.stage = { type: 'number', op: 'eq', value: Number(stageFilter) };
+            }
 
             const params = {
                 page:     currentPage,
@@ -1154,7 +1296,7 @@ const LeadsGrid = () => {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, categoriesReady, columnDefsReady, selectedCategory, responsibleFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, categoriesReady, columnDefsReady, selectedCategory, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -1196,6 +1338,7 @@ const LeadsGrid = () => {
         if (value) params.set('categoryId', value); else params.delete('categoryId');
         navigate(`${location.pathname}?${params.toString()}`, { replace: true });
         setAppliedFilters(value ? { categoryId: value } : {});
+        setStageFilter('');  // stages are category-specific
         setNoteCounts({});
         setReminderCounts({});
         setCurrentPage(1);
@@ -1299,12 +1442,14 @@ const LeadsGrid = () => {
             return updated;
         });
         setResponsibleFilter('');
+        setStageFilter('');
         setCurrentPage(1);
     };
 
     const activeFilterCount = Object.entries(appliedFilters)
         .filter(([k, v]) => k !== 'categoryId' && isFilterActive(v)).length
-        + (isSuperAdmin && responsibleFilter ? 1 : 0);
+        + (isSuperAdmin && responsibleFilter ? 1 : 0)
+        + (stageFilter ? 1 : 0);
 
     const hasAnyFilter = activeFilterCount > 0 ||
         Object.values(filters).some(v => isFilterActive(v));
@@ -1350,6 +1495,8 @@ const LeadsGrid = () => {
         const initialForm  = {};
         const editableKeys = fields.filter(f => !TRAILING_FIELDS.includes(f));
         editableKeys.forEach(f => { initialForm[f] = ''; });
+        // Default a new lead to the category's first stage (stages are pre-sorted by order).
+        if (stages.length > 0) initialForm.stage = stages[0].id;
         setEditFields(editableKeys);
         setEditForm(initialForm);
         setIsEditFormVisible(true);
@@ -1363,6 +1510,8 @@ const LeadsGrid = () => {
         const editableKeys = fields.filter(f => !TRAILING_FIELDS.includes(f));
         const formData     = {};
         editableKeys.forEach(f => { formData[f] = lead[f] ?? ''; });
+        // Stage is not a grid column — seed it explicitly for the StageSelect.
+        if (stages.length > 0) formData.stage = lead.stage ?? '';
         setEditFields(editableKeys);
         setEditForm(formData);
         setIsEditFormVisible(true);
@@ -1521,16 +1670,21 @@ const LeadsGrid = () => {
             <td
                 className="px-3 py-2 whitespace-nowrap text-[11px] font-medium sticky left-0 z-10 transition-colors"
                 style={{
+                    width: RESP_PIN_W,
+                    minWidth: RESP_PIN_W,
                     boxShadow: '4px 0 8px -2px rgba(0,0,0,0.06)',
-                    backgroundColor: assigned ? tint(baseColor) : '#ffffff'
+                    backgroundColor: '#ffffff'
                 }}
             >
                 {assigned ? (
-                    <div className="flex items-center gap-1.5">
+                    <div
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: tint(baseColor, 0.28) }}
+                    >
                         {imgUrl ? (
-                            <img src={imgUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-white/70" onError={e => { e.target.style.display = 'none'; }} />
+                            <img src={imgUrl} alt="" className="w-4 h-4 rounded-full object-cover border border-white/70" onError={e => { e.target.style.display = 'none'; }} />
                         ) : (
-                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold text-[9px] select-none" style={{ backgroundColor: baseColor }}>
+                            <span className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold text-[8px] select-none" style={{ backgroundColor: baseColor }}>
                                 {name.charAt(0).toUpperCase()}
                             </span>
                         )}
@@ -1543,11 +1697,38 @@ const LeadsGrid = () => {
         );
     };
 
+    /**
+     * Stage cell — pinned immediately after Responsible. Uses the admin-chosen
+     * stage colour (from stageMap), tinted for the pill background, mirroring the
+     * Responsible pill treatment. Guards against an unknown/missing stage id.
+     */
+    const renderStageCell = (lead, left) => {
+        const stage = stageMap.get(lead.stage);
+        return (
+            <td
+                className="px-3 py-2 whitespace-nowrap text-[11px] font-medium sticky z-10 transition-colors"
+                style={{ left, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.06)', backgroundColor: '#ffffff' }}
+            >
+                {stage ? (
+                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full" style={{ backgroundColor: tint(stage.color, 0.28) }}>
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stage.color }} />
+                        <span className="truncate text-gray-800">{stage.name}</span>
+                    </div>
+                ) : (
+                    <span className="text-gray-400">—</span>
+                )}
+            </td>
+        );
+    };
+
     const displayFields = visibleFields ?? fields;
-    // Responsible is rendered as a dedicated pinned-left column, never inside the
-    // draggable/sortable set.
+    // Responsible and Stage are rendered as dedicated pinned-left columns, never
+    // inside the draggable/sortable set.
     const hasResponsibleCol = displayFields.includes('responsible');
+    const hasStageCol = stages.length > 0;
     const gridFields = hasResponsibleCol ? displayFields.filter(f => f !== 'responsible') : displayFields;
+    // Pinned-column geometry: Responsible sits at left:0, Stage immediately after it.
+    const STAGE_LEFT = hasResponsibleCol ? RESP_PIN_W : 0;
 
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -1618,6 +1799,18 @@ const LeadsGrid = () => {
                                         admins={adminsList}
                                         value={responsibleFilter}
                                         onChange={(v) => { setResponsibleFilter(v); setCurrentPage(1); }}
+                                    />
+                                    <div className="w-px h-6 bg-gray-200 mx-1.5" />
+                                </>
+                            )}
+
+                            {/* Group 1c: Stage filter — available to all users */}
+                            {hasStageCol && (
+                                <>
+                                    <StageFilterDropdown
+                                        stages={stages}
+                                        value={stageFilter}
+                                        onChange={(v) => { setStageFilter(v); setCurrentPage(1); }}
                                     />
                                     <div className="w-px h-6 bg-gray-200 mx-1.5" />
                                 </>
@@ -1805,8 +1998,13 @@ const LeadsGrid = () => {
                                                         <SortableContext items={gridFields} strategy={horizontalListSortingStrategy}>
                                                             <tr>
                                                                 {hasResponsibleCol && (
-                                                                    <th className="px-3 py-2.5 text-left align-middle sticky left-0 z-30 bg-white/90 backdrop-blur-xl" style={{ boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
+                                                                    <th className="px-3 py-2.5 text-left align-middle sticky left-0 z-30 bg-white/90 backdrop-blur-xl" style={{ width: RESP_PIN_W, minWidth: RESP_PIN_W, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
                                                                         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Responsible</span>
+                                                                    </th>
+                                                                )}
+                                                                {hasStageCol && (
+                                                                    <th className="px-3 py-2.5 text-left align-middle sticky z-30 bg-white/90 backdrop-blur-xl" style={{ left: STAGE_LEFT, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
+                                                                        <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Stage</span>
                                                                     </th>
                                                                 )}
                                                                 {gridFields.map(field => {
@@ -1846,7 +2044,7 @@ const LeadsGrid = () => {
                                                 </thead>
                                                 <tbody className={`bg-white divide-y divide-gray-100 transition-opacity duration-200 ${loading && leads.length > 0 ? 'opacity-50 pointer-events-none' : ''}`}>
                                                     {loading && leads.length === 0 ? (
-                                                        <tr><td colSpan={displayFields.length + 1} className="px-3 py-6 text-center">
+                                                        <tr><td colSpan={displayFields.length + 1 + (hasStageCol ? 1 : 0)} className="px-3 py-6 text-center">
                                                             <div className="flex flex-col justify-center items-center gap-2">
                                                                 <div className="relative">
                                                                     <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300" />
@@ -1856,7 +2054,7 @@ const LeadsGrid = () => {
                                                             </div>
                                                         </td></tr>
                                                     ) : leads.length === 0 ? (
-                                                        <tr><td colSpan={displayFields.length + 1} className="px-3 py-6 text-center">
+                                                        <tr><td colSpan={displayFields.length + 1 + (hasStageCol ? 1 : 0)} className="px-3 py-6 text-center">
                                                             <div className="flex flex-col items-center gap-2">
                                                                 <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
                                                                 <span className="text-gray-500 text-xs font-medium">No leads found</span>
@@ -1866,6 +2064,7 @@ const LeadsGrid = () => {
                                                         leads.map((lead, idx) => (
                                                             <tr key={lead._id} className="group hover:bg-gray-50 transition-all duration-200" style={{ animationDelay: `${idx * 50}ms` }}>
                                                                 {hasResponsibleCol && renderResponsibleCell(lead)}
+                                                                {hasStageCol && renderStageCell(lead, STAGE_LEFT)}
                                                                 {gridFields.map(field => renderCell(field, lead))}
                                                                 <td className="px-3 py-2 whitespace-nowrap text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 transition-colors" style={{ boxShadow: '-4px 0 8px -2px rgba(0,0,0,0.06)' }}>
                                                                      <div className="flex items-center justify-center gap-1.5">
@@ -1953,6 +2152,7 @@ const LeadsGrid = () => {
                                     onCancel={cancelEdit}
                                     isSaving={isSaving}
                                     admins={adminsList}
+                                    stages={stages}
                                 />
                             )}
 

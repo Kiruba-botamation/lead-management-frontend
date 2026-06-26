@@ -316,6 +316,211 @@ const CategoryNameDialog = ({ initial = '', onSave, onClose, saving }) => {
 
 // ── Main CategoryTab component ───────────────────────────────────────────────
 
+// ── Stage editor ──────────────────────────────────────────────────────────────
+// Stages are managed inline via dedicated endpoints (independent of the category
+// Save flow). At least one stage is mandatory; deleting a stage reassigns its
+// leads to the first remaining stage.
+const DEFAULT_STAGE_COLOR = '#4f46e5';
+
+const StagesEditor = ({ acctId, categoryId, stages, onStagesChange, showSuccess, showError }) => {
+    const [busy, setBusy]               = useState(false);
+    const [adding, setAdding]           = useState(false);
+    const [newName, setNewName]         = useState('');
+    const [newColor, setNewColor]       = useState(DEFAULT_STAGE_COLOR);
+    const [confirmDelete, setConfirmDelete] = useState(null); // the stage pending deletion
+
+    const base = `/api/ui/leads/categories/${categoryId}/stages`;
+
+    const addStage = async () => {
+        const name = newName.trim();
+        if (!name) return;
+        setBusy(true);
+        try {
+            const res = await api.post(base, { name, color: newColor }, { params: { acctId } });
+            onStagesChange(res.data?.data || []);
+            setNewName(''); setNewColor(DEFAULT_STAGE_COLOR); setAdding(false);
+            showSuccess('Stage added.');
+        } catch (err) {
+            showError(err.response?.data?.message || 'Failed to add stage.');
+        } finally { setBusy(false); }
+    };
+
+    // Persist a name/colour edit. Skips the call when nothing changed.
+    const saveStage = async (stage, patch) => {
+        if (patch.name !== undefined && patch.name.trim() === stage.name) return;
+        if (patch.color !== undefined && patch.color === stage.color) return;
+        if (patch.name !== undefined && !patch.name.trim()) return;
+        setBusy(true);
+        try {
+            const res = await api.put(`${base}/${stage.id}`, patch, { params: { acctId } });
+            onStagesChange(res.data?.data || []);
+        } catch (err) {
+            showError(err.response?.data?.message || 'Failed to update stage.');
+        } finally { setBusy(false); }
+    };
+
+    const moveStage = async (index, dir) => {
+        const target = index + dir;
+        if (target < 0 || target >= stages.length) return;
+        const ordered = [...stages];
+        const [m] = ordered.splice(index, 1);
+        ordered.splice(target, 0, m);
+        const orderedIds = ordered.map(s => s.id);
+        onStagesChange(ordered.map((s, i) => ({ ...s, order: i }))); // optimistic
+        setBusy(true);
+        try {
+            const res = await api.put(`${base}/reorder`, { orderedIds }, { params: { acctId } });
+            onStagesChange(res.data?.data || []);
+        } catch (err) {
+            showError(err.response?.data?.message || 'Failed to reorder stages.');
+        } finally { setBusy(false); }
+    };
+
+    const deleteStage = async () => {
+        if (!confirmDelete) return;
+        setBusy(true);
+        try {
+            const res = await api.delete(`${base}/${confirmDelete.id}`, { params: { acctId } });
+            const data = res.data?.data || {};
+            onStagesChange(data.stages || []);
+            const moved = data.reassignedCount || 0;
+            showSuccess(moved ? `Stage deleted — ${moved} lead(s) reassigned.` : 'Stage deleted.');
+            setConfirmDelete(null);
+        } catch (err) {
+            showError(err.response?.data?.message || 'Failed to delete stage.');
+        } finally { setBusy(false); }
+    };
+
+    return (
+        <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Lead Stages</span>
+                <span className="text-[10px] text-gray-400">At least one stage is required</span>
+            </div>
+            <p className="text-[11px] text-gray-400 mb-3">
+                Stages track where a lead is in your pipeline. Deleting a stage moves its leads to the first stage.
+            </p>
+
+            <ul className="flex flex-col gap-2">
+                {stages.map((stage, index) => (
+                    <li key={stage.id} className="flex items-center gap-2">
+                        {/* Reorder */}
+                        <div className="flex flex-col">
+                            <button
+                                type="button"
+                                disabled={busy || index === 0}
+                                onClick={() => moveStage(index, -1)}
+                                className="w-4 h-3 flex items-center justify-center text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
+                            </button>
+                            <button
+                                type="button"
+                                disabled={busy || index === stages.length - 1}
+                                onClick={() => moveStage(index, 1)}
+                                className="w-4 h-3 flex items-center justify-center text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                        </div>
+
+                        {/* Order id badge */}
+                        <span className="text-[10px] font-mono text-gray-400 w-4 text-center">{stage.id}</span>
+
+                        {/* Colour swatch */}
+                        <label className="relative w-7 h-7 rounded-md border border-gray-200 cursor-pointer shrink-0 overflow-hidden" style={{ backgroundColor: stage.color }}>
+                            <input
+                                type="color"
+                                defaultValue={stage.color}
+                                disabled={busy}
+                                onBlur={(e) => saveStage(stage, { color: e.target.value })}
+                                className="absolute inset-0 opacity-0 cursor-pointer"
+                            />
+                        </label>
+
+                        {/* Name */}
+                        <input
+                            type="text"
+                            defaultValue={stage.name}
+                            disabled={busy}
+                            onBlur={(e) => saveStage(stage, { name: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                            className="ds-input ds-input--sm flex-1"
+                        />
+
+                        {/* Delete */}
+                        <Tooltip content={stages.length <= 1 ? 'At least one stage is required' : 'Delete stage'} placement="top">
+                            <span>
+                                <button
+                                    type="button"
+                                    disabled={busy || stages.length <= 1}
+                                    onClick={() => setConfirmDelete(stage)}
+                                    className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-300 text-gray-400 hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:border-gray-300 disabled:hover:text-gray-400"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </span>
+                        </Tooltip>
+                    </li>
+                ))}
+            </ul>
+
+            {/* Add stage */}
+            {adding ? (
+                <div className="flex items-center gap-2 mt-3">
+                    <label className="relative w-7 h-7 rounded-md border border-gray-200 cursor-pointer shrink-0 overflow-hidden" style={{ backgroundColor: newColor }}>
+                        <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                    </label>
+                    <input
+                        autoFocus
+                        type="text"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') addStage(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
+                        placeholder="Stage name (e.g. In Progress)"
+                        className="ds-input ds-input--sm flex-1"
+                    />
+                    <Button size="sm" onClick={addStage} disabled={busy || !newName.trim()} loading={busy}>Add</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setNewName(''); }} disabled={busy}>Cancel</Button>
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => setAdding(true)}
+                    className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors mt-3"
+                >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                    Add Stage
+                </button>
+            )}
+
+            {/* Delete confirmation */}
+            {confirmDelete && (
+                <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !busy && setConfirmDelete(null)} />
+                    <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-sm p-6 flex flex-col gap-4">
+                        <div className="flex justify-center">
+                            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+                                <svg className="w-6 h-6 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99L13.74 4a2 2 0 00-3.48 0L3.34 16.01A2 2 0 005.07 19z" /></svg>
+                            </div>
+                        </div>
+                        <div className="text-center">
+                            <h3 className="text-sm font-bold text-gray-900">Delete stage "{confirmDelete.name}"?</h3>
+                        </div>
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-800">
+                            Any leads currently in this stage will be <strong>reassigned to the first stage</strong>.
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                            <Button size="sm" variant="secondary" scheme="primary" onClick={() => setConfirmDelete(null)} disabled={busy}>Cancel</Button>
+                            <Button size="sm" variant="danger" onClick={deleteStage} disabled={busy} loading={busy}>Delete & reassign</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const CategoryTab = () => {
     const { acctId, acctNo } = useAccount();
     const { showSuccess, showError, NotificationComponent } = useNotifications();
@@ -454,6 +659,13 @@ const CategoryTab = () => {
         }
     };
 
+    // Keep the selected category's stages in sync after a stage CRUD operation,
+    // and mirror them into the lightweight list so the grid/other tabs stay current.
+    const handleStagesChange = (stages) => {
+        setSelectedCategory(prev => prev ? { ...prev, stages } : prev);
+        setCategories(prev => prev.map(c => c._id === selectedId ? { ...c, stages } : c));
+    };
+
     // ── Delete category ────────────────────────────────────────────────────
 
     const handleDeleteCategory = async () => {
@@ -484,7 +696,7 @@ const CategoryTab = () => {
                 fields: []
             }, { params: { acctId } });
             const created = res.data?.data;
-            setCategories(prev => [...prev, { _id: created._id, categoryName: created.categoryName, default: created.default }]);
+            setCategories(prev => [...prev, { _id: created._id, categoryName: created.categoryName, default: created.default, stages: created.stages || [] }]);
             setSelectedId(created._id);
             setShowNewCategoryDialog(false);
             showSuccess(`Category "${created.categoryName}" created.`);
@@ -722,6 +934,16 @@ const CategoryTab = () => {
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* Lead stages */}
+                        <StagesEditor
+                            acctId={acctId}
+                            categoryId={selectedId}
+                            stages={selectedCategory.stages || []}
+                            onStagesChange={handleStagesChange}
+                            showSuccess={showSuccess}
+                            showError={showError}
+                        />
                     </div>
                 ) : null}
             </div>

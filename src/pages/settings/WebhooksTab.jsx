@@ -13,9 +13,10 @@ import Button from '../../components/ui/Button';
 import ConfirmationDialog from '../../components/ConfirmationDialog';
 
 const EVENT_LABELS = {
-    'lead.created':    'New Lead',
-    'lead.assigned':   'Lead Assigned',
-    'lead.unassigned': 'Lead Unassigned',
+    'lead.created':       'New Lead',
+    'lead.assigned':      'Lead Assigned',
+    'lead.unassigned':    'Lead Unassigned',
+    'lead.stage_changed': 'Stage Changed',
 };
 
 const WebhooksTab = ({ acctId: acctIdProp }) => {

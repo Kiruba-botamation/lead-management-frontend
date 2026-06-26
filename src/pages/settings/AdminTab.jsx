@@ -28,6 +28,76 @@ const getAvatarColor = (str) => {
 
 const fullName = (a) => [a.firstName || '', a.lastName || ''].filter(Boolean).join(' ') || '-';
 
+const ROLE_COLORS = {
+    superadmin: { bg: 'bg-indigo-100', text: 'text-indigo-700', dot: 'bg-indigo-500' },
+    admin:      { bg: 'bg-gray-100',   text: 'text-gray-600',   dot: 'bg-gray-400'   },
+};
+
+const AccessLevelSelect = ({ roles, value, onChange, disabled }) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDocClick);
+        return () => document.removeEventListener('mousedown', onDocClick);
+    }, []);
+
+    const selected = roles.find(r => r.key === value) || null;
+    const colors = ROLE_COLORS[value] || ROLE_COLORS.admin;
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setOpen(o => !o)}
+                className="ds-input w-full flex items-center justify-between gap-2 text-left disabled:opacity-50"
+            >
+                <span className="flex items-center gap-2 min-w-0">
+                    {selected ? (
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${colors.bg} ${colors.text}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
+                            {selected.label}
+                        </span>
+                    ) : (
+                        <span className="text-gray-400">Select role…</span>
+                    )}
+                </span>
+                <svg className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {open && (
+                <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl py-1 overflow-hidden">
+                    {roles.map(r => {
+                        const rc = ROLE_COLORS[r.key] || ROLE_COLORS.admin;
+                        const isActive = r.key === value;
+                        return (
+                            <button
+                                key={r.key}
+                                type="button"
+                                onClick={() => { onChange(r.key); setOpen(false); }}
+                                className={`w-full px-3 py-2 flex items-center gap-2.5 text-left text-xs transition-colors ${isActive ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
+                            >
+                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${rc.bg} ${rc.text}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${rc.dot}`} />
+                                    {r.label}
+                                </span>
+                                {isActive && (
+                                    <svg className="ml-auto w-3.5 h-3.5 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const AdminTab = ({ acctId }) => {
     const [admins, setAdmins] = useState([]);
     const [filters, setFilters] = useState({});
@@ -395,13 +465,9 @@ const AdminTab = ({ acctId }) => {
                     <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-80 p-5" onClick={(e) => e.stopPropagation()}>
                         <h3 className="text-sm font-bold text-gray-800 mb-1">Edit Access Level</h3>
                         <p className="text-xs text-gray-500 mb-4">{fullName(editingAdmin)}</p>
-                        <select
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 mb-4"
-                        >
-                            {roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
-                        </select>
+                        <div className="mb-4">
+                            <AccessLevelSelect roles={roles} value={editValue} onChange={setEditValue} disabled={saving} />
+                        </div>
                         <div className="flex justify-end gap-2">
                             <button
                                 onClick={() => setEditingAdmin(null)}
