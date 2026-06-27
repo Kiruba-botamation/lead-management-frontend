@@ -329,7 +329,7 @@ const ApiTab = ({ acctId: acctIdProp }) => {
                                 {endpointText}
                             </code>
                             <p className="mt-1 text-[11px] text-gray-500">
-                                To assign a category: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">POST /api/leads/:category</code>
+                                To assign a collection: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">POST /api/leads/:collection</code>
                             </p>
                         </div>
 
@@ -385,7 +385,7 @@ const ApiTab = ({ acctId: acctIdProp }) => {
                             <ul className="list-disc list-inside space-y-1 text-[11px] text-gray-600">
                                 <li><code className="bg-gray-100 px-1 py-0.5 rounded font-mono">data</code> is required &mdash; accepts a single object or an array of objects.</li>
                                 <li>The schema is flexible &mdash; any key/value pairs are accepted as lead fields.</li>
-                                <li>Category can be set via the URL path (<code className="bg-gray-100 px-1 py-0.5 rounded font-mono">/api/leads/enterprise</code>) or as a <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">category</code> field inside <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">data</code>. Defaults to <strong>default</strong>.</li>
+                                <li>Collection can be set via the URL path (<code className="bg-gray-100 px-1 py-0.5 rounded font-mono">/api/leads/enterprise</code>) or as a <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">collection</code> field inside <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">data</code>. Defaults to <strong>default</strong>.</li>
                                 <li><code className="bg-gray-100 px-1 py-0.5 rounded font-mono">config.merge.properties</code> is optional &mdash; omit it to always create new leads.</li>
                             </ul>
                         </div>

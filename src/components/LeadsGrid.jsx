@@ -4,10 +4,10 @@
  * Layout: full-screen data table with optional right-side add/edit panel.
  *
  * Data loading strategy (two-call):
- *  1. On mount and category change → fetch column definitions from
- *     GET /api/ui/leads/categories/:id/fields
+ *  1. On mount and collection change → fetch column definitions from
+ *     GET /api/ui/leads/collections/:id/fields
  *  2. Fetch lead data from GET /api/ui/leads (pagination, sort, filter
- *     re-use call #2 only — column defs don't change within a category).
+ *     re-use call #2 only — column defs don't change within a collection).
  *
  * Filter encoding: all typed filters are sent as a single `fieldFilters`
  * JSON string parameter so each filter can carry its type, operator, and value(s).
@@ -18,7 +18,6 @@ import ExcelJS from 'exceljs';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
 import { useAuth } from '../context/AuthContext';
-import { Combobox } from './ui/Combobox';
 import { useNotifications } from './Notifications';
 import { useReminderStream } from '../hooks/useReminderStream';
 import LoadingMask from './LoadingMask';
@@ -30,6 +29,8 @@ import Button from './ui/Button';
 import { Dropdown, DropdownItem } from './ui/Dropdown';
 import { notesApi }     from '../api/notesApi';
 import { remindersApi } from '../api/remindersApi';
+import { twoLetterColor, adminDisplayName, tint, ResponsibleSelect, StageSelect } from './leads/leadShared';
+import LeadsKanban from './leads/LeadsKanban';
 import {
     DndContext,
     DragOverlay,
@@ -49,37 +50,49 @@ import { CSS } from '@dnd-kit/utilities';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0284c7'];
-
-/** Stable colour for a responsible/admin name, seeded on its first two letters. */
-const twoLetterColor = (name) => {
-    if (!name) return COLORS[0];
-    const seed = (name.charCodeAt(0) || 0) + (name.charCodeAt(1) || 0);
-    return COLORS[seed % COLORS.length];
-};
-
-const adminDisplayName = (a) => (a?.firstName || [a?.firstName, a?.lastName].filter(Boolean).join(' ') || 'Unknown');
-
-/** Opaque light tint of a hex colour (mixed with white) — used to paint the pinned Responsible cell. */
-const tint = (hex, ratio = 0.16) => {
-    const n = parseInt(hex.slice(1), 16);
-    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-    const mix = (c) => Math.round(c * ratio + 255 * (1 - ratio));
-    return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
-};
-
 /** Fields that are framework-internal and never rendered as grid columns */
-const EXCLUDE_FROM_GRID = new Set(['__v', '_id', 'acctId', 'categoryId', 'adminName', 'adminProfileImage', 'stage']);
+const EXCLUDE_FROM_GRID = new Set(['__v', '_id', 'acctId', 'collectionId', 'adminName', 'adminProfileImage', 'stage']);
 
 /** Fixed width (px) reserved for the pinned Responsible column so the pinned
  *  Stage column can be offset by exactly this amount. */
 const RESP_PIN_W = 150;
 
-/** Trailing columns always appended after category-defined fields */
+/** Fixed width (px) for the pinned Stage column. */
+const STAGE_PIN_W = 140;
+
+/** Width (px) of the trailing sticky Actions column (w-20 = 5rem). */
+const ACTIONS_COL_W = 80;
+
+/** Trailing columns always appended after collection-defined fields */
 const TRAILING_FIELDS = ['createdAt', 'updatedAt'];
 
 /** System column labels */
 const SYSTEM_LABELS = { createdAt: 'Created At', updatedAt: 'Updated At' };
+
+/**
+ * Optimal default column widths (px) by field type — data-grid best practice.
+ * Columns never shrink below these; when the total exceeds the viewport the grid
+ * scrolls horizontally instead of squeezing every column into view.
+ */
+const MIN_COLUMN_WIDTH      = 110;   // hard floor so no column ever gets crushed
+const DEFAULT_COLUMN_WIDTH  = 180;   // comfortable default for free-text values
+const MAX_AUTO_COLUMN_WIDTH = 280;   // cap so one long header can't dominate
+const COLUMN_WIDTH_BY_TYPE  = {
+    boolean: 100,
+    number:  120,
+    date:    150,
+    stage:   150,
+    text:    180,
+};
+
+/** Resolve a sensible default width for a column from its type and header label. */
+const defaultColumnWidth = (colDef, field) => {
+    const base   = COLUMN_WIDTH_BY_TYPE[colDef?.type] ?? DEFAULT_COLUMN_WIDTH;
+    const label  = colDef?.label || SYSTEM_LABELS[field] || field || '';
+    // Roughly fit the header text (≈8px/char) plus room for the drag/sort/filter affordances.
+    const labelW = Math.min(MAX_AUTO_COLUMN_WIDTH, Math.round(label.length * 8) + 56);
+    return Math.max(MIN_COLUMN_WIDTH, base, labelW);
+};
 
 /** Number filter operators */
 const NUM_OPS = [
@@ -124,15 +137,15 @@ const saveNested = (key, acctId, catId, value) => {
     writeStore(key, store);
 };
 
-const loadSelectedCategory = (acctId) => {
-    const store = readStore('selectedCategory');
+const loadSelectedCollection = (acctId) => {
+    const store = readStore('selectedCollection');
     return store[acctId] ?? null;
 };
 
-const saveSelectedCategory = (acctId, value) => {
-    const store = readStore('selectedCategory');
+const saveSelectedCollection = (acctId, value) => {
+    const store = readStore('selectedCollection');
     if (value) store[acctId] = value; else delete store[acctId];
-    writeStore('selectedCategory', store);
+    writeStore('selectedCollection', store);
 };
 
 
@@ -613,6 +626,7 @@ const SortableColumnHeader = ({
         position:   'relative',
         zIndex:     isSelfDragging ? 999 : undefined,
         width:      width || undefined,
+        minWidth:   width || undefined,
     };
 
     return (
@@ -666,103 +680,6 @@ const DragOverlayColumnHeader = ({ field, label }) => (
 
 
 // ── Add/Edit lead form (right panel) ──────────────────────────────────────────
-
-/**
- * Responsible (assignee) picker — a custom dropdown so we can show each admin's
- * avatar + first name. The first option is "None" (unassigned). The selected
- * value stored in the form is the admin's userId (empty string when unassigned).
- */
-const ResponsibleSelect = ({ admins, value, onChange, disabled }) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-
-    useEffect(() => {
-        const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-        document.addEventListener('mousedown', onDocClick);
-        return () => document.removeEventListener('mousedown', onDocClick);
-    }, []);
-
-    const selected = admins.find(a => a.userId === value) || null;
-
-    const renderAvatar = (a, size = 'w-5 h-5') => {
-        const name = adminDisplayName(a);
-        return a.profileImage
-            ? <img src={a.profileImage} alt="" className={`${size} rounded-full object-cover border border-gray-200`} onError={e => { e.target.style.display = 'none'; }} />
-            : <span className={`${size} rounded-full flex items-center justify-center text-white font-bold text-[9px] select-none`} style={{ backgroundColor: twoLetterColor(name) }}>{name.charAt(0).toUpperCase()}</span>;
-    };
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                type="button"
-                disabled={disabled}
-                onClick={() => setOpen(o => !o)}
-                className="ds-input ds-input--sm w-full flex items-center justify-between gap-2 text-left disabled:opacity-50"
-            >
-                <span className="flex items-center gap-1.5 min-w-0">
-                    {selected ? (<>{renderAvatar(selected)}<span className="truncate">{adminDisplayName(selected)}</span></>) : <span className="text-gray-400">None</span>}
-                </span>
-                <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-            {open && (
-                <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl py-1">
-                    <button type="button" onClick={() => { onChange(''); setOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${!value ? 'bg-indigo-50' : ''}`}>
-                        <span className="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 text-[10px]">∅</span>
-                        <span className="text-gray-500">None</span>
-                    </button>
-                    {admins.map(a => (
-                        <button key={a.userId} type="button" onClick={() => { onChange(a.userId); setOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${value === a.userId ? 'bg-indigo-50' : ''}`}>
-                            {renderAvatar(a)}
-                            <span className="truncate text-gray-700">{adminDisplayName(a)}</span>
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
-
-/** Stage picker for the edit panel — mirrors ResponsibleSelect but uses the
- *  admin-chosen stage colours. `stages` is [{ id, name, color }]. */
-const StageSelect = ({ stages, value, onChange, disabled }) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-
-    useEffect(() => {
-        const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-        document.addEventListener('mousedown', onDocClick);
-        return () => document.removeEventListener('mousedown', onDocClick);
-    }, []);
-
-    const selected = stages.find(s => String(s.id) === String(value)) || null;
-    const swatch = (color) => <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />;
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                type="button"
-                disabled={disabled}
-                onClick={() => setOpen(o => !o)}
-                className="ds-input ds-input--sm w-full flex items-center justify-between gap-2 text-left disabled:opacity-50"
-            >
-                <span className="flex items-center gap-1.5 min-w-0">
-                    {selected ? (<>{swatch(selected.color)}<span className="truncate">{selected.name}</span></>) : <span className="text-gray-400">None</span>}
-                </span>
-                <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-            {open && (
-                <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl py-1">
-                    {stages.map(s => (
-                        <button key={s.id} type="button" onClick={() => { onChange(s.id); setOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${String(value) === String(s.id) ? 'bg-indigo-50' : ''}`}>
-                            {swatch(s.color)}
-                            <span className="truncate text-gray-700">{s.name}</span>
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
 
 const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditForm, onSave, onCancel, isSaving, admins, stages = [] }) => {
     const isEditFormDirty = editLead
@@ -1011,6 +928,81 @@ const StageFilterDropdown = ({ stages, value, onChange }) => {
 };
 
 
+// ── Collection selector dropdown (toolbar) ────────────────────────────────────
+// Custom dropdown matching the Responsible/Stage filter styling, with a trailing
+// "Create new collection" link that routes to Settings → Collection.
+
+const CollectionSelectDropdown = ({ collections, value, onChange, onCreate, disabled }) => {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef(null);
+
+    React.useEffect(() => {
+        const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, []);
+
+    const selected = collections.find(c => c._id === value) || null;
+    const folderIcon = (
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+        </svg>
+    );
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setOpen(o => !o)}
+                className={`h-8 px-2.5 min-w-[176px] flex items-center justify-between gap-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${value ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-semibold' : 'bg-white border-gray-300 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50'}`}
+            >
+                <span className="flex items-center gap-1.5 min-w-0">
+                    {folderIcon}
+                    {selected
+                        ? <span className="truncate">{selected.collectionName}</span>
+                        : <span className="text-gray-400">Select Collection</span>}
+                </span>
+                <svg className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {open && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[200px] max-h-60 overflow-y-auto py-1">
+                    {collections.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-gray-400">No collections yet</p>
+                    ) : collections.map(c => (
+                        <button
+                            key={c._id}
+                            type="button"
+                            onClick={() => { onChange(c._id); setOpen(false); }}
+                            className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${value === c._id ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-700'}`}
+                        >
+                            {folderIcon}
+                            <span className="truncate">{c.collectionName}</span>
+                            {c.default && (
+                                <span className={`ml-auto text-[9px] font-semibold uppercase ${value === c._id ? 'text-indigo-400' : 'text-gray-400'}`}>default</span>
+                            )}
+                        </button>
+                    ))}
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                        type="button"
+                        onClick={() => { setOpen(false); onCreate?.(); }}
+                        className="w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs font-semibold text-indigo-600 hover:bg-indigo-50"
+                    >
+                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Create new collection
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
 // ── Main LeadsGrid component ───────────────────────────────────────────────────
 
 const LeadsGrid = () => {
@@ -1052,7 +1044,7 @@ const LeadsGrid = () => {
     const [error, setError]             = useState(null);
     const [isExporting, setIsExporting] = useState(false);
 
-    // ── Column definitions (from category — separate from lead data) ──────────
+    // ── Column definitions (from collection — separate from lead data) ──────────
     /**
      * columnDefs: [{ label, field, type, system? }]
      * fields:     [fieldName] — ordered list used for render + dnd
@@ -1096,7 +1088,11 @@ const LeadsGrid = () => {
     const [activeColId, setActiveColId] = useState(null);
     const [colWidths, setColWidths]         = useState({});
 
-    // ── Stage state (per selected category) ───────────────────────────────────
+    // ── Grid viewport width (for even-spreading columns) ──────────────────────
+    const gridScrollRef = useRef(null);
+    const [gridViewportW, setGridViewportW] = useState(0);
+
+    // ── Stage state (per selected collection) ───────────────────────────────────
     const [stages,      setStages]      = useState([]);   // [{ id, name, color, order }]
     const [stageFilter, setStageFilter] = useState('');   // selected stage id (string) or ''
     const stageMap = React.useMemo(() => {
@@ -1105,14 +1101,14 @@ const LeadsGrid = () => {
         return m;
     }, [stages]);
 
-    // ── Category state ────────────────────────────────────────────────────────
-    const [categories,           setCategories]           = useState([]);
-    const [selectedCategory,     setSelectedCategory]     = useState('');
-    const [categoryLoading,      setCategoryLoading]      = useState(false);
-    const [categoriesReady,      setCategoriesReady]      = useState(false);
+    // ── Collection state ────────────────────────────────────────────────────────
+    const [collections,           setCollections]           = useState([]);
+    const [selectedCollection,     setSelectedCollection]     = useState('');
+    const [collectionLoading,      setCollectionLoading]      = useState(false);
+    const [collectionsReady,      setCollectionsReady]      = useState(false);
     const [columnDefsReady,      setColumnDefsReady]      = useState(false);
-    const [deleteCategoryPending, setDeleteCategoryPending] = useState(null);
-    const [deleteCategoryLoading, setDeleteCategoryLoading] = useState(false);
+    const [deleteCollectionPending, setDeleteCollectionPending] = useState(null);
+    const [deleteCollectionLoading, setDeleteCollectionLoading] = useState(false);
 
     // ── Edit / Delete form ────────────────────────────────────────────────────
     const [editLead,          setEditLead]          = useState(null);
@@ -1132,6 +1128,30 @@ const LeadsGrid = () => {
     const [noteCounts,      setNoteCounts]      = useState({}); // { [leadId]: number }
     const [reminderCounts,  setReminderCounts]  = useState({}); // { [leadId]: number }
 
+    // ── View mode: 'grid' (default) | 'kanban' ────────────────────────────────
+    // The Kanban is lazy-mounted on first switch and then kept mounted so toggling
+    // back and forth is instant (its per-stage data survives the toggle).
+    const [viewMode,      setViewMode]      = useState('grid');
+    const [kanbanMounted, setKanbanMounted] = useState(false);
+    // Bumped whenever a lead is created/updated/deleted from the shared panels so
+    // the Kanban knows to refresh.
+    const [leadsVersion,  setLeadsVersion]  = useState(0);
+
+
+    // ── Restore the saved view (grid/kanban) for the active collection ─────────
+    useEffect(() => {
+        if (!acctId || !selectedCollection) { setViewMode('grid'); return; }
+        const saved = loadNested('view', acctId, selectedCollection);
+        const next  = saved === 'kanban' ? 'kanban' : 'grid';
+        setViewMode(next);
+        if (next === 'kanban') setKanbanMounted(true);
+    }, [acctId, selectedCollection]);
+
+    const setView = (mode) => {
+        if (mode === 'kanban') setKanbanMounted(true);
+        saveNested('view', acctId, selectedCollection, mode === 'grid' ? null : 'kanban');
+        setViewMode(mode);
+    };
 
     // ── Click-outside: close column selector ─────────────────────────────────
     useEffect(() => {
@@ -1144,6 +1164,17 @@ const LeadsGrid = () => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    // ── Track the grid viewport width (drives even-spread of columns) ─────────
+    useEffect(() => {
+        const el = gridScrollRef.current;
+        if (!el) return;
+        const update = () => setGridViewportW(el.clientWidth);
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [viewMode, isEditFormVisible, activityLead, isGridVisible]);
+
     // ── Responsive: hide grid when edit form open on small screens ────────────
     useEffect(() => {
         const check = () => setIsGridVisible(window.innerWidth > 768 ? true : !isEditFormVisible && !activityLead);
@@ -1152,50 +1183,50 @@ const LeadsGrid = () => {
         return () => window.removeEventListener('resize', check);
     }, [isEditFormVisible, activityLead]);
 
-    // ── CALL 1: Fetch category list ───────────────────────────────────────────
-    const fetchCategories = useCallback(async () => {
+    // ── CALL 1: Fetch collection list ───────────────────────────────────────────
+    const fetchCollections = useCallback(async () => {
         if (!acctId) return;
-        setCategoryLoading(true);
-        setCategoriesReady(false);
+        setCollectionLoading(true);
+        setCollectionsReady(false);
         setCurrentPage(1);
         try {
-            const res  = await api.get('/api/ui/leads/categories', { params: { acctId } });
-            const list = (res.data?.data || []).filter(c => c?._id && c?.categoryName);
-            setCategories(list);
+            const res  = await api.get('/api/ui/leads/collections', { params: { acctId } });
+            const list = (res.data?.data || []).filter(c => c?._id && c?.collectionName);
+            setCollections(list);
 
-            const urlCatId = new URLSearchParams(window.location.search).get('categoryId');
-            const stored   = loadSelectedCategory(acctId);
+            const urlCatId = new URLSearchParams(window.location.search).get('collectionId');
+            const stored   = loadSelectedCollection(acctId);
             const active   = list.find(c => c._id === urlCatId)
                           || list.find(c => c._id === stored)
                           || list.find(c => c.default)
                           || list[0];
 
             if (active) {
-                setSelectedCategory(active._id);
+                setSelectedCollection(active._id);
                 const params = new URLSearchParams(window.location.search);
-                params.set('categoryId', active._id);
+                params.set('collectionId', active._id);
                 navigate(`${window.location.pathname}?${params.toString()}`, { replace: true });
             }
-            setCategoriesReady(true);
+            setCollectionsReady(true);
         } catch {
-            setCategoriesReady(true);
+            setCollectionsReady(true);
         } finally {
-            setCategoryLoading(false);
+            setCollectionLoading(false);
         }
     }, [acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    useEffect(() => { fetchCategories(); }, [fetchCategories]);
+    useEffect(() => { fetchCollections(); }, [fetchCollections]);
 
-    // ── CALL 2: Fetch column definitions for selected category ────────────────
-    const fetchColumnDefs = useCallback(async (categoryId) => {
-        if (!categoryId || !acctId) return;
+    // ── CALL 2: Fetch column definitions for selected collection ────────────────
+    const fetchColumnDefs = useCallback(async (collectionId) => {
+        if (!collectionId || !acctId) return;
         setColumnDefsReady(false);
         try {
-            const res  = await api.get(`/api/ui/leads/categories/${categoryId}/fields`, { params: { acctId } });
+            const res  = await api.get(`/api/ui/leads/collections/${collectionId}/fields`, { params: { acctId } });
             const data = res.data?.data;
             if (!data) return;
 
-            // Category-defined fields (system + user), then trailing timestamp fields
+            // Collection-defined fields (system + user), then trailing timestamp fields
             const catFields = (data.fields || []).map(f => f.field);
             const allFields = [...catFields, ...TRAILING_FIELDS];
 
@@ -1204,7 +1235,7 @@ const LeadsGrid = () => {
 
             // Apply saved column order, then restore visibility
             // Always enforce TRAILING_FIELDS at the very end regardless of saved order
-            const savedOrder = loadNested('colOrder', acctId, categoryId);
+            const savedOrder = loadNested('colOrder', acctId, collectionId);
             const rawOrdered = applyColOrder(allFields, savedOrder);
             const ordered = [
                 ...rawOrdered.filter(f => !TRAILING_FIELDS.includes(f)),
@@ -1212,7 +1243,7 @@ const LeadsGrid = () => {
             ];
             setFields(ordered);
 
-            const savedVis = loadNested('colVis', acctId, categoryId);
+            const savedVis = loadNested('colVis', acctId, collectionId);
             if (savedVis) {
                 const valid = ordered.filter(f => savedVis.includes(f));
                 setVisibleFields(valid.length > 0 ? valid : null);
@@ -1220,8 +1251,8 @@ const LeadsGrid = () => {
                 setVisibleFields(null);
             }
 
-            // Restore/init filter state for this category
-            const savedFilters = loadNested('filters', acctId, categoryId) || {};
+            // Restore/init filter state for this collection
+            const savedFilters = loadNested('filters', acctId, collectionId) || {};
             const initFilters  = {};
             allFields.forEach(f => { initFilters[f] = savedFilters[f] ?? null; });
             setFilters(initFilters);
@@ -1232,18 +1263,28 @@ const LeadsGrid = () => {
         }
     }, [acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Trigger column defs fetch when category selection changes
+    // Trigger column defs fetch when collection selection changes
     useEffect(() => {
-        if (selectedCategory) {
-            fetchColumnDefs(selectedCategory);
-            setColWidths({});  // reset column widths on category change
+        if (selectedCollection) {
+            fetchColumnDefs(selectedCollection);
+            setColWidths({});  // reset column widths on collection change
         }
-    }, [selectedCategory, fetchColumnDefs]);
+    }, [selectedCollection, fetchColumnDefs]);
 
     // ── CALL 3: Fetch lead data ───────────────────────────────────────────────
     const fetchLeads = useCallback(async () => {
-        if (!isAccountLinked || !acctId || !categoriesReady || !columnDefsReady) {
+        if (!isAccountLinked || !acctId || !collectionsReady || !columnDefsReady) {
             if (accountsLoaded && !accountsLoading && !isAccountLinked) setLoading(false);
+            // Account is linked and the collection list has loaded, but there is no
+            // collection to load leads for (e.g. a freshly linked account with none
+            // created yet). Column defs never get fetched in that case, so stop here
+            // and show the empty grid instead of spinning forever.
+            if (isAccountLinked && collectionsReady && !selectedCollection) {
+                setLeads([]);
+                setTotalRecords(0);
+                setTotalPages(0);
+                setLoading(false);
+            }
             return;
         }
 
@@ -1253,7 +1294,7 @@ const LeadsGrid = () => {
             // Build fieldFilters — only include active filters
             const activeFilters = {};
             for (const [key, def] of Object.entries(appliedFilters)) {
-                if (key === 'categoryId') continue;
+                if (key === 'collectionId') continue;
                 if (isFilterActive(def)) activeFilters[key] = def;
             }
             // Stage filter (from the toolbar menu) is applied as a typed number-eq filter.
@@ -1265,7 +1306,7 @@ const LeadsGrid = () => {
                 page:     currentPage,
                 limit:    pageSize,
                 acctId,
-                ...(selectedCategory  && { categoryId: selectedCategory }),
+                ...(selectedCollection  && { collectionId: selectedCollection }),
                 ...(sortField         && { sortBy: sortField, sortOrder }),
                 ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) }),
                 ...(isSuperAdmin && responsibleFilter && { responsibleFilter })
@@ -1296,7 +1337,7 @@ const LeadsGrid = () => {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, categoriesReady, columnDefsReady, selectedCategory, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -1330,49 +1371,49 @@ const LeadsGrid = () => {
     }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
-    // ── Category change ───────────────────────────────────────────────────────
-    const handleCategoryChange = (value) => {
-        setSelectedCategory(value || '');
-        saveSelectedCategory(acctId, value || null);
+    // ── Collection change ───────────────────────────────────────────────────────
+    const handleCollectionChange = (value) => {
+        setSelectedCollection(value || '');
+        saveSelectedCollection(acctId, value || null);
         const params = new URLSearchParams(location.search);
-        if (value) params.set('categoryId', value); else params.delete('categoryId');
+        if (value) params.set('collectionId', value); else params.delete('collectionId');
         navigate(`${location.pathname}?${params.toString()}`, { replace: true });
-        setAppliedFilters(value ? { categoryId: value } : {});
-        setStageFilter('');  // stages are category-specific
+        setAppliedFilters(value ? { collectionId: value } : {});
+        setStageFilter('');  // stages are collection-specific
         setNoteCounts({});
         setReminderCounts({});
         setCurrentPage(1);
-        // Column defs + filters will reload via the selectedCategory effect
+        // Column defs + filters will reload via the selectedCollection effect
     };
 
-    const handleSetDefault = async (categoryId) => {
+    const handleSetDefault = async (collectionId) => {
         try {
-            await api.put(`/api/ui/leads/categories/${categoryId}/default`, { acctId });
-            setCategories(prev => prev.map(c => ({ ...c, default: c._id === categoryId })));
-            showSuccess('Default category updated.');
+            await api.put(`/api/ui/leads/collections/${collectionId}/default`, { acctId });
+            setCollections(prev => prev.map(c => ({ ...c, default: c._id === collectionId })));
+            showSuccess('Default collection updated.');
         } catch (err) {
-            showError(err.response?.data?.message || 'Failed to update default category.');
+            showError(err.response?.data?.message || 'Failed to update default collection.');
         }
     };
 
-    const handleDeleteCategoryConfirm = async () => {
-        if (!deleteCategoryPending) return;
-        setDeleteCategoryLoading(true);
+    const handleDeleteCollectionConfirm = async () => {
+        if (!deleteCollectionPending) return;
+        setDeleteCollectionLoading(true);
         try {
-            await api.delete(`/api/ui/leads/categories/${deleteCategoryPending._id}`, { params: { acctId } });
-            showSuccess(`Category "${deleteCategoryPending.categoryName}" deleted.`);
-            const remaining = categories.filter(c => c._id !== deleteCategoryPending._id);
-            setCategories(remaining);
-            if (selectedCategory === deleteCategoryPending._id) {
+            await api.delete(`/api/ui/leads/collections/${deleteCollectionPending._id}`, { params: { acctId } });
+            showSuccess(`Collection "${deleteCollectionPending.collectionName}" deleted.`);
+            const remaining = collections.filter(c => c._id !== deleteCollectionPending._id);
+            setCollections(remaining);
+            if (selectedCollection === deleteCollectionPending._id) {
                 const next   = remaining.find(c => c.default) || remaining[0] || null;
                 const nextId = next?._id || '';
-                handleCategoryChange(nextId);
+                handleCollectionChange(nextId);
             }
-            setDeleteCategoryPending(null);
+            setDeleteCollectionPending(null);
         } catch (err) {
-            showError(err.response?.data?.message || 'Failed to delete category.');
+            showError(err.response?.data?.message || 'Failed to delete collection.');
         } finally {
-            setDeleteCategoryLoading(false);
+            setDeleteCollectionLoading(false);
         }
     };
 
@@ -1417,13 +1458,13 @@ const LeadsGrid = () => {
             const updated = { ...prev };
             if (isFilterActive(value)) updated[field] = value;
             else delete updated[field];
-            // Persist (excluding categoryId)
-            const { categoryId: _c, ...toSave } = updated;
-            saveNested('filters', acctId, selectedCategory, Object.keys(toSave).length > 0 ? toSave : null);
+            // Persist (excluding collectionId)
+            const { collectionId: _c, ...toSave } = updated;
+            saveNested('filters', acctId, selectedCollection, Object.keys(toSave).length > 0 ? toSave : null);
             return updated;
         });
         setCurrentPage(1);
-    }, [acctId, selectedCategory]);
+    }, [acctId, selectedCollection]);
 
     const handleApplyFilters = useCallback(() => {
         for (const [field, value] of Object.entries(filters)) {
@@ -1435,10 +1476,10 @@ const LeadsGrid = () => {
         const cleared = {};
         fields.forEach(f => { cleared[f] = null; });
         setFilters(cleared);
-        saveNested('filters', acctId, selectedCategory, null);
+        saveNested('filters', acctId, selectedCollection, null);
         setAppliedFilters(prev => {
             const updated = {};
-            if (prev.categoryId) updated.categoryId = prev.categoryId;
+            if (prev.collectionId) updated.collectionId = prev.collectionId;
             return updated;
         });
         setResponsibleFilter('');
@@ -1447,7 +1488,7 @@ const LeadsGrid = () => {
     };
 
     const activeFilterCount = Object.entries(appliedFilters)
-        .filter(([k, v]) => k !== 'categoryId' && isFilterActive(v)).length
+        .filter(([k, v]) => k !== 'collectionId' && isFilterActive(v)).length
         + (isSuperAdmin && responsibleFilter ? 1 : 0)
         + (stageFilter ? 1 : 0);
 
@@ -1479,13 +1520,13 @@ const LeadsGrid = () => {
             return [...reordered, ...hidden];
         });
         if (visibleFields) setVisibleFields(reordered);
-        saveNested('colOrder', acctId, selectedCategory, reordered);
+        saveNested('colOrder', acctId, selectedCollection, reordered);
     };
 
     // ── Column visibility ─────────────────────────────────────────────────────
     const updateVisibleFields = (newVal) => {
         setVisibleFields(newVal);
-        saveNested('colVis', acctId, selectedCategory, newVal);
+        saveNested('colVis', acctId, selectedCollection, newVal);
     };
 
 
@@ -1495,8 +1536,10 @@ const LeadsGrid = () => {
         const initialForm  = {};
         const editableKeys = fields.filter(f => !TRAILING_FIELDS.includes(f));
         editableKeys.forEach(f => { initialForm[f] = ''; });
-        // Default a new lead to the category's first stage (stages are pre-sorted by order).
+        // Default a new lead to the collection's first stage (stages are pre-sorted by order).
         if (stages.length > 0) initialForm.stage = stages[0].id;
+        // Default the assignee to the admin creating the lead (same idea as the default stage).
+        if (editableKeys.includes('responsible') && currentUserId) initialForm.responsible = currentUserId;
         setEditFields(editableKeys);
         setEditForm(initialForm);
         setIsEditFormVisible(true);
@@ -1504,6 +1547,13 @@ const LeadsGrid = () => {
 
     // ── Edit lead ─────────────────────────────────────────────────────────────
     const handleEditOpen = (lead) => {
+        // Toggle: clicking Edit again for the same lead closes the panel.
+        if (isEditFormVisible && editLead?._id === lead._id) {
+            setIsEditFormVisible(false);
+            setEditLead(null);
+            setEditFields([]);
+            return;
+        }
         // Close activity panel if open (panels are mutually exclusive)
         setActivityLead(null);
         setEditLead(lead);
@@ -1524,10 +1574,10 @@ const LeadsGrid = () => {
                 await api.put(`/api/ui/leads/${editLead._id}`, editForm, { params: { acctId, acctNo } });
                 showSuccess('Lead updated successfully.');
             } else {
-                const activeCat    = categories.find(c => c._id === selectedCategory);
-                const categoryName = activeCat?.categoryName;
-                const url          = categoryName
-                    ? `/api/ui/leads/${encodeURIComponent(categoryName)}`
+                const activeCat    = collections.find(c => c._id === selectedCollection);
+                const collectionName = activeCat?.collectionName;
+                const url          = collectionName
+                    ? `/api/ui/leads/${encodeURIComponent(collectionName)}`
                     : '/api/ui/leads';
                 await api.post(url, { data: editForm }, { params: { acctId } });
                 showSuccess('Lead created successfully.');
@@ -1536,6 +1586,7 @@ const LeadsGrid = () => {
             setEditLead(null);
             setEditFields([]);
             fetchLeads();
+            setLeadsVersion(v => v + 1);
         } catch (err) {
             showError(err.response?.data?.message || (editLead ? 'Failed to update lead.' : 'Failed to create lead.'));
         } finally {
@@ -1551,6 +1602,11 @@ const LeadsGrid = () => {
 
     // ── Activity panel (Notes / Reminders) ───────────────────────────────────
     const handleActivityOpen = (lead, tab = 'notes') => {
+        // Toggle: clicking the same tab again for the same lead closes the panel.
+        if (activityLead?._id === lead._id && activityTab === tab) {
+            setActivityLead(null);
+            return;
+        }
         setActivityLead(lead);
         setActivityTab(tab);
         // Close edit form if open (panels are mutually exclusive)
@@ -1572,6 +1628,7 @@ const LeadsGrid = () => {
             setIsDeleteOpen(false);
             setDeleteLeadId(null);
             fetchLeads();
+            setLeadsVersion(v => v + 1);
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to delete lead.');
         }
@@ -1590,12 +1647,12 @@ const LeadsGrid = () => {
         try {
             const activeFilters = {};
             for (const [k, v] of Object.entries(appliedFilters)) {
-                if (k !== 'categoryId' && isFilterActive(v)) activeFilters[k] = v;
+                if (k !== 'collectionId' && isFilterActive(v)) activeFilters[k] = v;
             }
             const params = {
                 limit:  100000,
                 acctId,
-                ...(selectedCategory && { categoryId: selectedCategory }),
+                ...(selectedCollection && { collectionId: selectedCollection }),
                 ...(sortField        && { sortBy: sortField, sortOrder }),
                 ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) })
             };
@@ -1648,9 +1705,18 @@ const LeadsGrid = () => {
     // ── Row cell renderer ─────────────────────────────────────────────────────
     const renderCell = (field, lead) => {
         const colDef = columnDefMap.get(field);
+        const raw    = lead[field];
+        const display = formatValue(colDef, raw);
+        // Fixed-width columns: clip overflow with an ellipsis (and a hover tooltip
+        // via title) so long values never bleed into the neighbouring column.
+        const titleText = (raw === null || raw === undefined || typeof raw === 'object') ? undefined : String(raw);
         return (
-            <td key={field} className="px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium text-center">
-                {formatValue(colDef, lead[field])}
+            <td
+                key={field}
+                title={titleText}
+                className="px-3 py-2 whitespace-nowrap overflow-hidden text-ellipsis text-[11px] text-gray-900 font-medium text-center"
+            >
+                {display}
             </td>
         );
     };
@@ -1707,7 +1773,7 @@ const LeadsGrid = () => {
         return (
             <td
                 className="px-3 py-2 whitespace-nowrap text-[11px] font-medium sticky z-10 transition-colors"
-                style={{ left, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.06)', backgroundColor: '#ffffff' }}
+                style={{ left, width: STAGE_PIN_W, minWidth: STAGE_PIN_W, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.06)', backgroundColor: '#ffffff' }}
             >
                 {stage ? (
                     <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full" style={{ backgroundColor: tint(stage.color, 0.28) }}>
@@ -1729,6 +1795,21 @@ const LeadsGrid = () => {
     const gridFields = hasResponsibleCol ? displayFields.filter(f => f !== 'responsible') : displayFields;
     // Pinned-column geometry: Responsible sits at left:0, Stage immediately after it.
     const STAGE_LEFT = hasResponsibleCol ? RESP_PIN_W : 0;
+
+    // ── Even-spread the data columns when they don't fill the viewport ─────────
+    // With table-layout:fixed the columns keep their pixel widths, so a handful of
+    // narrow columns would sit left-aligned with empty space on the right. We
+    // measure the visible grid width and share any leftover space equally across
+    // the data columns so they fill the width.
+    const colBaseWidth = (field) => colWidths[field] || defaultColumnWidth(columnDefMap.get(field), field);
+    const extraPerCol = React.useMemo(() => {
+        if (!gridViewportW || gridFields.length === 0) return 0;
+        const pinned = (hasResponsibleCol ? RESP_PIN_W : 0) + (hasStageCol ? STAGE_PIN_W : 0) + ACTIONS_COL_W;
+        const dataTotal = gridFields.reduce((sum, f) => sum + colBaseWidth(f), 0);
+        const leftover = gridViewportW - pinned - dataTotal;
+        return leftover > 0 ? Math.floor(leftover / gridFields.length) : 0;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [gridViewportW, gridFields, colWidths, columnDefMap, hasResponsibleCol, hasStageCol]);
 
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -1762,23 +1843,21 @@ const LeadsGrid = () => {
                         {/* ── Toolbar ─────────────────────────────────────────── */}
                         <div className="mb-3 flex-shrink-0 flex items-center justify-start gap-1 flex-wrap">
 
-                            {/* Group 1: Category */}
+                            {/* Group 1: Collection */}
                             <div className="flex items-center gap-1.5">
-                                <Combobox
-                                    value={selectedCategory || null}
-                                    onChange={val => handleCategoryChange(val || '')}
-                                    options={categories.map(c => ({ value: c._id, label: c.categoryName }))}
-                                    disabled={categoryLoading || !acctId}
-                                    placeholder="Select Category"
-                                    size="sm"
-                                    className="w-44"
+                                <CollectionSelectDropdown
+                                    collections={collections}
+                                    value={selectedCollection || null}
+                                    onChange={val => handleCollectionChange(val || '')}
+                                    onCreate={() => navigate('/settings')}
+                                    disabled={collectionLoading || !acctId}
                                 />
-                                {selectedCategory && (() => {
-                                    const activeCat = categories.find(c => c._id === selectedCategory);
+                                {selectedCollection && (() => {
+                                    const activeCat = collections.find(c => c._id === selectedCollection);
                                     return activeCat ? (
-                                        <Tooltip content={`Delete category "${activeCat.categoryName}"`} placement="top">
+                                        <Tooltip content={`Delete collection "${activeCat.collectionName}"`} placement="top">
                                             <button
-                                                onClick={() => setDeleteCategoryPending(activeCat)}
+                                                onClick={() => setDeleteCollectionPending(activeCat)}
                                                 className="group relative w-8 h-8 flex items-center justify-center bg-transparent rounded-lg hover:bg-red-50 transition-all duration-300 hover:scale-110 border border-gray-300 hover:border-red-400 focus:ring-1 focus:ring-red-300"
                                             >
                                                 <svg className="w-4 h-4 text-gray-600 group-hover:text-red-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1804,8 +1883,8 @@ const LeadsGrid = () => {
                                 </>
                             )}
 
-                            {/* Group 1c: Stage filter — available to all users */}
-                            {hasStageCol && (
+                            {/* Group 1c: Stage filter — available to all users (grid view only) */}
+                            {hasStageCol && viewMode === 'grid' && (
                                 <>
                                     <StageFilterDropdown
                                         stages={stages}
@@ -1864,7 +1943,7 @@ const LeadsGrid = () => {
                                 </Tooltip>
                                 <Tooltip content={loading ? 'Loading...' : 'Refresh'} placement="top">
                                     <button
-                                        onClick={fetchLeads}
+                                        onClick={() => { fetchLeads(); setLeadsVersion(v => v + 1); }}
                                         disabled={loading}
                                         className="group relative w-8 h-8 flex items-center justify-center bg-transparent rounded-lg hover:bg-indigo-50 transition-all duration-300 hover:scale-110 border border-gray-300 hover:border-indigo-400 focus:ring-1 focus:ring-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
@@ -1972,15 +2051,51 @@ const LeadsGrid = () => {
                                     Add Lead
                                 </Button>
                             </Tooltip>
+
+                            {/* Group 6: View toggle (Grid ⇄ Kanban) — segmented control,
+                                pinned to the far right. */}
+                            {hasStageCol && (
+                                <div className="ml-auto inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 border border-gray-200">
+                                    <Tooltip content="Grid view" placement="top">
+                                        <button
+                                            onClick={() => setView('grid')}
+                                            aria-pressed={viewMode === 'grid'}
+                                            className={`relative w-8 h-7 flex items-center justify-center rounded-md transition-all duration-200 ${viewMode === 'grid' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                            {/* Grid / table icon — 2×2 cells */}
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" strokeWidth={2} />
+                                                <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" strokeWidth={2} />
+                                                <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" strokeWidth={2} />
+                                                <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" strokeWidth={2} />
+                                            </svg>
+                                        </button>
+                                    </Tooltip>
+                                    <Tooltip content="Kanban view" placement="top">
+                                        <button
+                                            onClick={() => setView('kanban')}
+                                            aria-pressed={viewMode === 'kanban'}
+                                            className={`relative w-8 h-7 flex items-center justify-center rounded-md transition-all duration-200 ${viewMode === 'kanban' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                            {/* Kanban / columns icon */}
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h3a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM15 5a1 1 0 011-1h3a1 1 0 011 1v9a1 1 0 01-1 1h-3a1 1 0 01-1-1V5z" />
+                                            </svg>
+                                        </button>
+                                    </Tooltip>
+                                </div>
+                            )}
                         </div>
 
                         {/* ── Split panel: Table + Edit form ──────────────── */}
                         <div className="flex flex-col sm:flex-row gap-4 transition-all duration-300 flex-1 min-h-0 w-full" style={{ alignItems: 'stretch' }}>
 
-                            {/* LEFT — Table */}
+                            {/* LEFT — Table (grid) or Kanban board, crossfaded */}
                             {isGridVisible && (
                                 <div className={`transition-all duration-300 flex flex-col min-h-0 ${(isEditFormVisible || activityLead) ? 'w-full sm:w-[calc(66.666%-0.5rem)]' : 'w-full'}`}>
-                                    <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white rounded-lg shadow-2xl border border-gray-200 animate-scale-in">
+                                  {/* GRID layer — kept mounted; toggled with the Kanban layer */}
+                                  <div className={`${viewMode === 'grid' ? 'flex view-enter-grid' : 'hidden'} flex-col flex-1 min-h-0`}>
+                                    <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white rounded-lg shadow-2xl border border-gray-200">
                                         {error && (
                                             <div className="bg-indigo-50 border-l-4 border-indigo-500 text-indigo-900 px-3 py-2 m-3 rounded-lg flex items-center justify-between gap-2">
                                                 <span className="text-xs font-medium flex items-center gap-2">
@@ -1991,7 +2106,7 @@ const LeadsGrid = () => {
                                             </div>
                                         )}
 
-                                        <div className="flex-1 overflow-y-scroll overflow-x-auto min-h-0">
+                                        <div ref={gridScrollRef} className="flex-1 overflow-y-scroll overflow-x-auto min-h-0">
                                             <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
                                                 <thead className="sticky top-0 z-20 bg-white/70 backdrop-blur-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] transition-all group/header">
                                                     <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragStart={handleColumnDragStart} onDragEnd={handleColumnDragEnd}>
@@ -2003,7 +2118,7 @@ const LeadsGrid = () => {
                                                                     </th>
                                                                 )}
                                                                 {hasStageCol && (
-                                                                    <th className="px-3 py-2.5 text-left align-middle sticky z-30 bg-white/90 backdrop-blur-xl" style={{ left: STAGE_LEFT, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
+                                                                    <th className="px-3 py-2.5 text-left align-middle sticky z-30 bg-white/90 backdrop-blur-xl" style={{ left: STAGE_LEFT, width: STAGE_PIN_W, minWidth: STAGE_PIN_W, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
                                                                         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Stage</span>
                                                                     </th>
                                                                 )}
@@ -2019,7 +2134,7 @@ const LeadsGrid = () => {
                                                                             handleSort={handleSort}
                                                                             isColFilterActive={isFilterActive(appliedFilters[field])}
                                                                             isDragging={activeColId !== null}
-                                                                            width={colWidths[field]}
+                                                                            width={colBaseWidth(field) + extraPerCol}
                                                                             onResize={handleColResize}
                                                                         />
                                                                     );
@@ -2137,6 +2252,38 @@ const LeadsGrid = () => {
                                             </div>
                                         </div>
                                     </div>
+                                  </div>
+                                  {/* KANBAN layer (lazy-mounted on first switch, then kept mounted) */}
+                                  {kanbanMounted && (
+                                    <div className={`${viewMode === 'kanban' ? 'flex view-enter-kanban' : 'hidden'} flex-col flex-1 min-h-0`}>
+                                        <LeadsKanban
+                                            acctId={acctId}
+                                            acctNo={acctNo}
+                                            collectionId={selectedCollection}
+                                            stages={stages}
+                                            setStages={setStages}
+                                            admins={adminsList}
+                                            isSuperAdmin={isSuperAdmin}
+                                            currentUserId={currentUserId}
+                                            appliedFilters={appliedFilters}
+                                            responsibleFilter={responsibleFilter}
+                                            sortField={sortField}
+                                            sortOrder={sortOrder}
+                                            onEdit={handleEditOpen}
+                                            onActivity={handleActivityOpen}
+                                            onDelete={handleDeleteOpen}
+                                            activeLeadId={activityLead?._id || editLead?._id || null}
+                                            activityTab={activityLead ? activityTab : null}
+                                            noteCounts={noteCounts}
+                                            reminderCounts={reminderCounts}
+                                            setNoteCounts={setNoteCounts}
+                                            setReminderCounts={setReminderCounts}
+                                            refreshKey={leadsVersion}
+                                            showSuccess={showSuccess}
+                                            showError={showError}
+                                        />
+                                    </div>
+                                  )}
                                 </div>
                             )}
 
@@ -2222,26 +2369,26 @@ const LeadsGrid = () => {
                 message="Are you sure you want to delete this lead? This action cannot be undone."
             />
 
-            {/* Delete category confirmation */}
-            {deleteCategoryPending && (
+            {/* Delete collection confirmation */}
+            {deleteCollectionPending && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleteCategoryLoading && setDeleteCategoryPending(null)} />
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleteCollectionLoading && setDeleteCollectionPending(null)} />
                     <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md p-6 animate-fade-in">
                         <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mx-auto mb-4">
                             <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </div>
-                        <h3 className="text-base font-semibold text-gray-900 text-center mb-2">Delete Category</h3>
+                        <h3 className="text-base font-semibold text-gray-900 text-center mb-2">Delete Collection</h3>
                         <p className="text-sm text-gray-600 text-center mb-1">You are about to permanently delete</p>
-                        <p className="text-sm font-semibold text-gray-900 text-center mb-3">&ldquo;{deleteCategoryPending.categoryName}&rdquo;</p>
+                        <p className="text-sm font-semibold text-gray-900 text-center mb-3">&ldquo;{deleteCollectionPending.collectionName}&rdquo;</p>
                         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5">
                             <p className="text-xs text-red-700 text-center leading-relaxed">
-                                This will also delete <strong>all leads</strong> in this category.<br />
+                                This will also delete <strong>all leads</strong> in this collection.<br />
                                 This action <strong>cannot be recovered</strong>.
                             </p>
                         </div>
                         <div className="flex gap-3">
-                            <Button block variant="secondary" scheme="danger" onClick={() => setDeleteCategoryPending(null)} disabled={deleteCategoryLoading}>Cancel</Button>
-                            <Button block variant="danger" onClick={handleDeleteCategoryConfirm} disabled={deleteCategoryLoading} loading={deleteCategoryLoading}>
+                            <Button block variant="secondary" scheme="danger" onClick={() => setDeleteCollectionPending(null)} disabled={deleteCollectionLoading}>Cancel</Button>
+                            <Button block variant="danger" onClick={handleDeleteCollectionConfirm} disabled={deleteCollectionLoading} loading={deleteCollectionLoading}>
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 Delete permanently
                             </Button>

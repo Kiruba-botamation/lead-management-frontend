@@ -72,12 +72,12 @@ const AnalyticsDashboardPage = () => {
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [chartsReady, setChartsReady] = useState(false);
-    const [categoryFieldsCache, setCategoryFieldsCache] = useState({});
+    const [collectionFieldsCache, setCollectionFieldsCache] = useState({});
     const fieldsFetchPromisesRef = useRef({});
 
-    // Category state
-    const [categories, setCategories] = useState([]);
-    const [categoryLoading, setCategoryLoading] = useState(false);
+    // Collection state
+    const [collections, setCollections] = useState([]);
+    const [collectionLoading, setCollectionLoading] = useState(false);
 
     // Header smart-hide state
     const [headerVisible, setHeaderVisible] = useState(true);
@@ -222,7 +222,7 @@ const AnalyticsDashboardPage = () => {
         barOrientation: 'vertical',
         chartColor: null,
         autoRefreshMins: null,
-        chartCategory: null,
+        chartCollection: null,
         dateGranularity: 'day',
         showLegend: true,
         showDataLabels: true,
@@ -283,7 +283,7 @@ const AnalyticsDashboardPage = () => {
                 autoRefreshMins: chart.autoRefreshMins ?? null,
                 zAxis: chart.zAxis || null,
                 chartMode: chart.chartMode || null,
-                chartCategory: chart.chartCategory || null,
+                chartCollection: chart.chartCollection || null,
                 fieldLabels: chart.fieldLabels || {},
                 numberSplitCount: chart.numberSplitCount ?? 0,
                 dateGranularity: chart.dateGranularity || 'day',
@@ -581,7 +581,7 @@ const AnalyticsDashboardPage = () => {
     // fieldsFetchIdRef cancels stale fetchFieldsData completions
     const fieldsFetchIdRef = React.useRef(0);
 
-    // Reset all data-related fields when category changes
+    // Reset all data-related fields when collection changes
     const resetChartDataFields = (chartId) => {
         const todayISO = getTodayISO();
         setCharts(prev => prev.map(chart => {
@@ -627,8 +627,8 @@ const AnalyticsDashboardPage = () => {
             yAxis: chartConfig.yAxis.value,
             aggregation: chartConfig.aggregation.value === 'average' ? 'avg' : chartConfig.aggregation.value,
             acctId: acctIdRef.current,
-            ...(chartConfig.chartCategory?._id || chartConfig.chartCategory
-                ? { categoryId: chartConfig.chartCategory?._id || chartConfig.chartCategory }
+            ...(chartConfig.chartCollection?._id || chartConfig.chartCollection
+                ? { collectionId: chartConfig.chartCollection?._id || chartConfig.chartCollection }
                 : {}),
             ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis
                 ? { zAxis: chartConfig.zAxis.value }
@@ -671,12 +671,12 @@ const AnalyticsDashboardPage = () => {
         setCharts(prev => prev.map(chart => {
             if (chart.id === chartId) {
                 let updatedChart = { ...chart, [field]: value };
-                // When category changes: reset axis/aggregation fields and fetch new category fields
-                if (field === 'chartCategory') {
+                // When collection changes: reset axis/aggregation fields and fetch new collection fields
+                if (field === 'chartCollection') {
                     const todayISO = getTodayISO();
                     const catId = value?._id || value;
-                    if (catId) fetchFieldsForCategory(catId);
-                    // Reset dependent fields so X/Y axis options reflect the new category
+                    if (catId) fetchFieldsForCollection(catId);
+                    // Reset dependent fields so X/Y axis options reflect the new collection
                     updatedChart = {
                         ...updatedChart,
                         chartType: null,
@@ -731,14 +731,14 @@ const AnalyticsDashboardPage = () => {
         try {
             const xAxisValue = isNumber ? chartConfig.yAxis.value : chartConfig.xAxis.value;
             const isDateAxis = xAxisValue === 'createdAt' || xAxisValue === 'updatedAt';
-            // Use the chart's own category if set
-            const effectiveCategoryId = chartConfig.chartCategory?._id || chartConfig.chartCategory || null;
+            // Use the chart's own collection if set
+            const effectiveCollectionId = chartConfig.chartCollection?._id || chartConfig.chartCollection || null;
             const params = {
                 xAxis: xAxisValue,
                 yAxis: chartConfig.yAxis.value,
                 aggregation: chartConfig.aggregation.value === 'average' ? 'avg' : chartConfig.aggregation.value,
                 ...(currentAcctId && { acctId: currentAcctId }),
-                ...(effectiveCategoryId && { categoryId: effectiveCategoryId }),
+                ...(effectiveCollectionId && { collectionId: effectiveCollectionId }),
                 ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? { zAxis: chartConfig.zAxis.value } : {}),
                 ...(chartConfig.dateFilterFrom && { dateFrom: chartConfig.dateFilterFrom }),
                 ...(chartConfig.dateFilterTo && { dateTo: chartConfig.dateFilterTo }),
@@ -804,9 +804,9 @@ const AnalyticsDashboardPage = () => {
                             : editFields._datePreset === 'custom'
                                 ? { dateFilterFrom: editFields.dateFilterFrom || todayISO, dateFilterTo: editFields.dateFilterTo || todayISO }
                                 : {}),
-                        chartCategory: editFields.chartCategory
-                            ? { _id: editFields.chartCategory._id, categoryName: editFields.chartCategory.categoryName }
-                            : existing.chartCategory,
+                        chartCollection: editFields.chartCollection
+                            ? { _id: editFields.chartCollection._id, collectionName: editFields.chartCollection.collectionName }
+                            : existing.chartCollection,
                     };
                 });
             }
@@ -822,8 +822,8 @@ const AnalyticsDashboardPage = () => {
                     ...(cfg._datePreset && cfg._datePreset !== 'custom'
                         ? resolveDatesForPreset(cfg._datePreset, cfg._lastNDays)
                         : { dateFilterFrom: cfg.dateFilterFrom || todayISO, dateFilterTo: cfg.dateFilterTo || todayISO }),
-                    chartCategory: cfg.chartCategory
-                        ? { _id: cfg.chartCategory._id, categoryName: cfg.chartCategory.categoryName }
+                    chartCollection: cfg.chartCollection
+                        ? { _id: cfg.chartCollection._id, collectionName: cfg.chartCollection.collectionName }
                         : null,
                 }));
                 updated = [...updated, ...newCharts];
@@ -846,8 +846,8 @@ const AnalyticsDashboardPage = () => {
                     ...capturedAddedIds,
                 ]);
                 const affectedCharts = current.filter(c => affectedIds.has(c.id));
-                const usedCatIds = [...new Set(affectedCharts.map(c => c.chartCategory?._id).filter(Boolean))];
-                usedCatIds.forEach(catId => fetchFieldsForCategory(catId));
+                const usedCatIds = [...new Set(affectedCharts.map(c => c.chartCollection?._id).filter(Boolean))];
+                usedCatIds.forEach(catId => fetchFieldsForCollection(catId));
                 affectedCharts.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     const ready = isNum
@@ -948,8 +948,8 @@ const AnalyticsDashboardPage = () => {
                 setChartDataCache({});
 
                 // Fetch field schemas and chart data for restored charts
-                const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-                usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+                const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+                usedCollections.forEach(catId => fetchFieldsForCollection(catId));
                 restored.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     if (isNum ? (chart.yAxis && chart.aggregation) : (chart.xAxis && chart.yAxis && chart.aggregation)) {
@@ -1327,12 +1327,12 @@ const AnalyticsDashboardPage = () => {
         setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
         setNextChartId(restored.length > 0 ? Math.max(...restored.map(c => c.id)) + 1 : 1);
         setChartDataCache({});
-        setCategoryFieldsCache({});
+        setCollectionFieldsCache({});
         fieldsFetchPromisesRef.current = {};
 
-        // Fetch field schemas for used categories
-        const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-        usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+        // Fetch field schemas for used collections
+        const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+        usedCollections.forEach(catId => fetchFieldsForCollection(catId));
 
         // Fetch initial data
         restored.forEach(chart => {
@@ -1351,26 +1351,26 @@ const AnalyticsDashboardPage = () => {
         saveCharts(acctId, viewingAs, charts);
     }, [charts, acctId, viewingAs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Fetch categories
-    const fetchCategories = async () => {
+    // Fetch collections
+    const fetchCollections = async () => {
         if (!acctId) return;
-        setCategoryLoading(true);
+        setCollectionLoading(true);
         try {
-            const response = await api.get('/api/ui/leads/categories', { params: { acctId } });
+            const response = await api.get('/api/ui/leads/collections', { params: { acctId } });
             const d = response.data;
-            const raw = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.categories) ? d.categories : [];
-            const filtered = raw.filter(item => item?._id && item?.categoryName);
-            setCategories(filtered);
+            const raw = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.collections) ? d.collections : [];
+            const filtered = raw.filter(item => item?._id && item?.collectionName);
+            setCollections(filtered);
         } catch (err) {
-            console.error('Error fetching categories:', err);
+            console.error('Error fetching collections:', err);
         } finally {
-            setCategoryLoading(false);
+            setCollectionLoading(false);
         }
     };
 
-    // Fetch categories when acctId changes
+    // Fetch collections when acctId changes
     useEffect(() => {
-        fetchCategories();
+        fetchCollections();
     }, [acctId]);
 
     // Fetch admins for View As dropdown.
@@ -1500,8 +1500,8 @@ const AnalyticsDashboardPage = () => {
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
                 setChartDataCache({});
 
-                const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-                usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+                const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+                usedCollections.forEach(catId => fetchFieldsForCollection(catId));
                 restored.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     if (isNum ? (chart.yAxis && chart.aggregation) : (chart.xAxis && chart.yAxis && chart.aggregation)) {
@@ -1526,9 +1526,9 @@ const AnalyticsDashboardPage = () => {
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
                 setChartDataCache({});
 
-                // Fetch field schemas for used categories
-                const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-                usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+                // Fetch field schemas for used collections
+                const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+                usedCollections.forEach(catId => fetchFieldsForCollection(catId));
 
                 // Fetch chart data
                 restored.forEach(chart => {
@@ -1581,10 +1581,10 @@ const AnalyticsDashboardPage = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [viewAsOpen]);
 
-    const fetchFieldsForCategory = async (catId) => {
+    const fetchFieldsForCollection = async (catId) => {
         if (!catId || !acctId) return [];
-        if (categoryFieldsCache[catId]?.length > 0) return categoryFieldsCache[catId];
-        // Deduplicate concurrent requests for the same category
+        if (collectionFieldsCache[catId]?.length > 0) return collectionFieldsCache[catId];
+        // Deduplicate concurrent requests for the same collection
         const promiseKey = `${catId}__${acctId}`;
         if (fieldsFetchPromisesRef.current[promiseKey]) {
             return await fieldsFetchPromisesRef.current[promiseKey];
@@ -1592,7 +1592,7 @@ const AnalyticsDashboardPage = () => {
 
         const promise = (async () => {
             try {
-                const response = await api.get(`/api/ui/leads/categories/${catId}/fields`, { params: { acctId } });
+                const response = await api.get(`/api/ui/leads/collections/${catId}/fields`, { params: { acctId } });
                 const rawFields = response.data?.data?.fields || [];
 
                 // Append system timestamp fields as column options
@@ -1602,7 +1602,7 @@ const AnalyticsDashboardPage = () => {
                     { field: 'updatedAt', label: 'Updated At', type: 'date' },
                 ];
 
-                setCategoryFieldsCache(prev => ({ ...prev, [catId]: allFields }));
+                setCollectionFieldsCache(prev => ({ ...prev, [catId]: allFields }));
                 return allFields;
             } catch (err) {
                 console.error('Error fetching fields:', err);
@@ -2384,7 +2384,7 @@ const AnalyticsDashboardPage = () => {
         }
     })();
 
-    // Shared "Update Chart" button used in both header-row (with categories) and no-category bar
+    // Shared "Update Chart" button used in both header-row (with collections) and no-collection bar
     const renderUpdateChartButton = (chartConfig, mergedConfig) => {
         const id = chartConfig.id;
         const isLoading = submittingCharts[id] || chartLoadingState[id];
@@ -2471,10 +2471,10 @@ const AnalyticsDashboardPage = () => {
     const renderChartCard = (chartConfig) => {
         // mergedConfig = committed state + any pending (draft) changes from the slider
         const mergedConfig = getMergedConfig(chartConfig);
-        const catIdForFields = mergedConfig.chartCategory?._id || mergedConfig.chartCategory;
+        const catIdForFields = mergedConfig.chartCollection?._id || mergedConfig.chartCollection;
         const excludeAxisFields = ['__v', '_id'];
         const chartFields = catIdForFields
-            ? (categoryFieldsCache[catIdForFields] || []).filter(f => !excludeAxisFields.includes(f.field))
+            ? (collectionFieldsCache[catIdForFields] || []).filter(f => !excludeAxisFields.includes(f.field))
             : [];
         const columns = chartFields.map(f => ({
             value: f.field,
@@ -2798,25 +2798,25 @@ const AnalyticsDashboardPage = () => {
 
                 >
 
-                    {/* ── Category — always shown first ── */}
-                    {categories.length > 0 && (
+                    {/* ── Collection — always shown first ── */}
+                    {collections.length > 0 && (
                         <div className="flex items-center justify-center gap-2 px-5 pt-2 pb-2 border-b border-gray-100 relative pr-10">
-                            <span className="text-xs font-semibold text-gray-700 shrink-0">Category:</span>
+                            <span className="text-xs font-semibold text-gray-700 shrink-0">Collection:</span>
                             <div className="w-48">
                                 <Combobox
                                     value={
-                                        mergedConfig.chartCategory
-                                            ? (typeof mergedConfig.chartCategory === 'object'
-                                                ? mergedConfig.chartCategory._id
-                                                : mergedConfig.chartCategory)
+                                        mergedConfig.chartCollection
+                                            ? (typeof mergedConfig.chartCollection === 'object'
+                                                ? mergedConfig.chartCollection._id
+                                                : mergedConfig.chartCollection)
                                             : null
                                     }
                                     onChange={(val) => {
                                         const todayISO = getTodayISO();
-                                        if (val) fetchFieldsForCategory(val);
-                                        // Reset all query-dependent fields in pending when category changes
+                                        if (val) fetchFieldsForCollection(val);
+                                        // Reset all query-dependent fields in pending when collection changes
                                         updatePendingConfigBatch(chartConfig.id, {
-                                            chartCategory: val || null,
+                                            chartCollection: val || null,
                                             chartType: null,
                                             xAxis: null,
                                             yAxis: null,
@@ -2831,16 +2831,16 @@ const AnalyticsDashboardPage = () => {
                                             _lastNDays: 2,
                                         });
                                     }}
-                                    options={categories.map(c => ({ value: c._id, label: c.categoryName }))}
-                                    placeholder="Select category..."
+                                    options={collections.map(c => ({ value: c._id, label: c.collectionName }))}
+                                    placeholder="Select collection..."
                                     dropdownClassName="!z-[500] !min-w-[160px]"
                                 />
                             </div>
-                            {mergedConfig.chartCategory && (
-                                <UITooltip content="Clear category filter" placement="top">
+                            {mergedConfig.chartCollection && (
+                                <UITooltip content="Clear collection filter" placement="top">
                                     <button
                                         onClick={() => updatePendingConfigBatch(chartConfig.id, {
-                                            chartCategory: null,
+                                            chartCollection: null,
                                             chartType: null,
                                             xAxis: null,
                                             yAxis: null,
@@ -2855,7 +2855,7 @@ const AnalyticsDashboardPage = () => {
                                 </UITooltip>
                             )}
                             {/* ── Update Chart button in header row ── */}
-                            {mergedConfig.chartCategory && (
+                            {mergedConfig.chartCollection && (
                                 <div className="ml-auto flex items-center">
                                     {renderUpdateChartButton(chartConfig, mergedConfig)}
                                 </div>
@@ -2871,11 +2871,11 @@ const AnalyticsDashboardPage = () => {
                         </div>
                     )}
 
-                    {/* ── Rest of controls — only shown when category is selected (or no categories exist) ── */}
-                    {(categories.length === 0 || mergedConfig.chartCategory) && (
+                    {/* ── Rest of controls — only shown when collection is selected (or no collections exist) ── */}
+                    {(collections.length === 0 || mergedConfig.chartCollection) && (
                         <>
-                            {/* ── Action buttons bar — only when no categories (otherwise in Account Category header row) ── */}
-                            {categories.length === 0 && (
+                            {/* ── Action buttons bar — only when no collections (otherwise in Account Collection header row) ── */}
+                            {collections.length === 0 && (
                                 <div className="flex items-center justify-end px-5 pt-2 pb-1 border-b border-gray-100 shrink-0 relative pr-10">
                                     {renderUpdateChartButton(chartConfig, mergedConfig)}
 
@@ -3208,10 +3208,10 @@ const AnalyticsDashboardPage = () => {
                         </>
                     )}
 
-                    {/* ── Hint when category not yet selected ── */}
-                    {categories.length > 0 && !mergedConfig.chartCategory && (
+                    {/* ── Hint when collection not yet selected ── */}
+                    {collections.length > 0 && !mergedConfig.chartCollection && (
                         <div className="px-5 pb-4 pt-1 text-center">
-                            <p className="text-[11px] text-gray-400 italic">Select a category above to configure this chart.</p>
+                            <p className="text-[11px] text-gray-400 italic">Select a collection above to configure this chart.</p>
                         </div>
                     )}
                 </div>
@@ -3284,7 +3284,7 @@ const AnalyticsDashboardPage = () => {
                     </div>
                     <div className="text-center">
                         <span className="text-lg font-semibold text-gray-900">Loading Dashboard</span>
-                        <p className="text-sm text-gray-500 mt-1">Fetching your categories and charts...</p>
+                        <p className="text-sm text-gray-500 mt-1">Fetching your collections and charts...</p>
                     </div>
                 </div>
             </div>
@@ -3690,7 +3690,7 @@ const AnalyticsDashboardPage = () => {
                 isOpen={aiChatOpen}
                 onClose={() => setAiChatOpen(false)}
                 acctId={acctId}
-                categories={categories}
+                collections={collections}
                 currentCharts={charts}
                 onAddCharts={handleAiChartsGenerated}
             />

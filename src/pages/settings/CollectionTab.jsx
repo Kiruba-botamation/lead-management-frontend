@@ -1,9 +1,9 @@
 /**
- * Category Settings Tab
+ * Collection Settings Tab
  *
  * Allows users to:
- *  - Create, rename, and manage lead categories
- *  - Define column schemas (label, field key, type) for each category
+ *  - Create, rename, and manage lead collections
+ *  - Define column schemas (label, field key, type) for each collection
  *  - Copy the external API integration info (endpoint, headers, payload)
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -93,7 +93,7 @@ const SYSTEM_FIELD_KEYS = new Set(SYSTEM_FIELDS.map(f => f.field));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Normalise a category name: lowercase, spaces → underscore, strip special chars */
+/** Normalise a collection name: lowercase, spaces → underscore, strip special chars */
 const normaliseName = (value) =>
     value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
 
@@ -133,7 +133,7 @@ const CopyButton = ({ text, size = 'sm' }) => {
 
 // ── API Info Modal ────────────────────────────────────────────────────────────
 
-const ApiInfoModal = ({ category, acctNo, acctId, onClose }) => {
+const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
     const [apiKey, setApiKey] = useState('<your-api-key>');
 
     // Fetch the real API key when the modal opens
@@ -144,10 +144,10 @@ const ApiInfoModal = ({ category, acctNo, acctId, onClose }) => {
             .catch(() => {}); // silently fall back to placeholder
     }, [acctId]);
 
-    if (!category) return null;
+    if (!collection) return null;
 
     const origin      = window.location.origin;
-    const endpoint    = `POST ${origin}/api/leads/${category.categoryName}`;
+    const endpoint    = `POST ${origin}/api/leads/${collection.collectionName}`;
     const headersText = `x-api-key: ${apiKey}\nx-page-id: ${acctNo || '<your-account-number>'}\nContent-Type: application/json`;
 
     // Build example payload from field definitions
@@ -183,13 +183,13 @@ const ApiInfoModal = ({ category, acctNo, acctId, onClose }) => {
             }
         }
     };
-    (category.fields || [])
+    (collection.fields || [])
         .filter(f => !SYSTEM_FIELD_KEYS.has(f.field))
         .forEach(f => { payloadFields[f.field] = dummyValue(f); });
 
     const payloadText = JSON.stringify({ data: payloadFields }, null, 2);
 
-    const curlText = `curl -X POST "${origin}/api/leads/${category.categoryName}" \\
+    const curlText = `curl -X POST "${origin}/api/leads/${collection.collectionName}" \\
   -H "x-api-key: ${apiKey}" \\
   -H "x-page-id: ${acctNo || '<your-account-number>'}" \\
   -H "Content-Type: application/json" \\
@@ -205,7 +205,7 @@ const ApiInfoModal = ({ category, acctNo, acctId, onClose }) => {
                          style={{ background: 'linear-gradient(135deg, #f8faff 0%, #eef2ff 100%)' }}>
                         <div>
                             <h3 className="text-sm font-bold text-slate-800">API Integration</h3>
-                            <p className="text-[11px] text-slate-500 mt-0.5">{category.categoryName}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{collection.collectionName}</p>
                         </div>
                         <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -251,7 +251,7 @@ const ApiInfoModal = ({ category, acctNo, acctId, onClose }) => {
                             </Section>
 
                             <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-[10px] text-yellow-800">
-                                <strong>Note:</strong> Only fields defined in this category are accepted.
+                                <strong>Note:</strong> Only fields defined in this collection are accepted.
                                 Payloads with unrecognised fields will be rejected with a 400 error.
                             </div>
                         </div>
@@ -271,9 +271,9 @@ const Section = ({ title, copyText, children }) => (
     </div>
 );
 
-// ── Add / Edit category name dialog ──────────────────────────────────────────
+// ── Add / Edit collection name dialog ────────────────────────────────────────
 
-const CategoryNameDialog = ({ initial = '', onSave, onClose, saving }) => {
+const CollectionNameDialog = ({ initial = '', onSave, onClose, saving }) => {
     const [value, setValue] = useState(initial);
     const preview = normaliseName(value);
 
@@ -282,10 +282,10 @@ const CategoryNameDialog = ({ initial = '', onSave, onClose, saving }) => {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
             <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-sm p-6">
                 <h3 className="text-sm font-bold text-gray-900 mb-4">
-                    {initial ? 'Rename Category' : 'New Category'}
+                    {initial ? 'Rename Collection' : 'New Collection'}
                 </h3>
 
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Category Name</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Collection Name</label>
                 <input
                     autoFocus
                     type="text"
@@ -314,22 +314,22 @@ const CategoryNameDialog = ({ initial = '', onSave, onClose, saving }) => {
     );
 };
 
-// ── Main CategoryTab component ───────────────────────────────────────────────
+// ── Main CollectionTab component ─────────────────────────────────────────────
 
 // ── Stage editor ──────────────────────────────────────────────────────────────
-// Stages are managed inline via dedicated endpoints (independent of the category
+// Stages are managed inline via dedicated endpoints (independent of the collection
 // Save flow). At least one stage is mandatory; deleting a stage reassigns its
 // leads to the first remaining stage.
 const DEFAULT_STAGE_COLOR = '#4f46e5';
 
-const StagesEditor = ({ acctId, categoryId, stages, onStagesChange, showSuccess, showError }) => {
+const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSuccess, showError }) => {
     const [busy, setBusy]               = useState(false);
     const [adding, setAdding]           = useState(false);
     const [newName, setNewName]         = useState('');
     const [newColor, setNewColor]       = useState(DEFAULT_STAGE_COLOR);
     const [confirmDelete, setConfirmDelete] = useState(null); // the stage pending deletion
 
-    const base = `/api/ui/leads/categories/${categoryId}/stages`;
+    const base = `/api/ui/leads/collections/${collectionId}/stages`;
 
     const addStage = async () => {
         const name = newName.trim();
@@ -521,68 +521,68 @@ const StagesEditor = ({ acctId, categoryId, stages, onStagesChange, showSuccess,
     );
 };
 
-const CategoryTab = () => {
+const CollectionTab = () => {
     const { acctId, acctNo } = useAccount();
     const { showSuccess, showError, NotificationComponent } = useNotifications();
 
-    const [categories, setCategories]               = useState([]);
-    const [selectedId, setSelectedId]               = useState(null);
-    const [selectedCategory, setSelectedCategory]   = useState(null); // full detail with fields
-    const [loadingList, setLoadingList]             = useState(false);
-    const [loadingDetail, setLoadingDetail]         = useState(false);
-    const [saving, setSaving]                       = useState(false);
+    const [collections, setCollections]               = useState([]);
+    const [selectedId, setSelectedId]                 = useState(null);
+    const [selectedCollection, setSelectedCollection] = useState(null); // full detail with fields
+    const [loadingList, setLoadingList]               = useState(false);
+    const [loadingDetail, setLoadingDetail]           = useState(false);
+    const [saving, setSaving]                         = useState(false);
 
-    // Local edit state for the selected category
+    // Local edit state for the selected collection
     const [editName, setEditName]   = useState('');
     const [editFields, setEditFields] = useState([]); // user-defined only
 
     // Dialogs
-    const [showNewCategoryDialog, setShowNewCategoryDialog] = useState(false);
-    const [showRenameDialog, setShowRenameDialog]           = useState(false);
-    const [showApiInfo, setShowApiInfo]                     = useState(false);
-    const [createSaving, setCreateSaving]                   = useState(false);
-    const [deleteLoading, setDeleteLoading]                 = useState(false);
-    const [showDeleteDialog, setShowDeleteDialog]           = useState(false);
+    const [showNewCollectionDialog, setShowNewCollectionDialog] = useState(false);
+    const [showRenameDialog, setShowRenameDialog]               = useState(false);
+    const [showApiInfo, setShowApiInfo]                         = useState(false);
+    const [createSaving, setCreateSaving]                       = useState(false);
+    const [deleteLoading, setDeleteLoading]                     = useState(false);
+    const [showDeleteDialog, setShowDeleteDialog]               = useState(false);
 
-    // ── Fetch category list ────────────────────────────────────────────────
+    // ── Fetch collection list ──────────────────────────────────────────────
 
-    const fetchCategories = useCallback(async () => {
+    const fetchCollections = useCallback(async () => {
         if (!acctId) return;
         setLoadingList(true);
         try {
-            const res = await api.get('/api/ui/leads/categories', { params: { acctId } });
+            const res = await api.get('/api/ui/leads/collections', { params: { acctId } });
             const list = res.data?.data || [];
-            setCategories(list);
+            setCollections(list);
 
-            // Auto-select first category
+            // Auto-select first collection
             if (list.length > 0 && !selectedId) {
                 setSelectedId(list[0]._id);
             }
         } catch (err) {
-            showError('Failed to load categories.');
+            showError('Failed to load collections.');
         } finally {
             setLoadingList(false);
         }
     }, [acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    useEffect(() => { fetchCategories(); }, [fetchCategories]);
+    useEffect(() => { fetchCollections(); }, [fetchCollections]);
 
-    // ── Fetch category field detail ────────────────────────────────────────
+    // ── Fetch collection field detail ──────────────────────────────────────
 
     useEffect(() => {
         if (!selectedId || !acctId) return;
         setLoadingDetail(true);
-        api.get(`/api/ui/leads/categories/${selectedId}/fields`, { params: { acctId } })
+        api.get(`/api/ui/leads/collections/${selectedId}/fields`, { params: { acctId } })
             .then(res => {
                 const data = res.data?.data;
                 if (!data) return;
                 const annotated = { ...data, fields: (data.fields || []).map(f => SYSTEM_FIELD_KEYS.has(f.field) ? { ...f, system: true } : f) };
-                setSelectedCategory(annotated);
-                setEditName(data.categoryName);
+                setSelectedCollection(annotated);
+                setEditName(data.collectionName);
                 // Only user-defined fields go into editFields; system fields remain locked
                 setEditFields((data.fields || []).filter(f => !SYSTEM_FIELD_KEYS.has(f.field)));
             })
-            .catch(() => showError('Failed to load category fields.'))
+            .catch(() => showError('Failed to load collection fields.'))
             .finally(() => setLoadingDetail(false));
     }, [selectedId, acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -617,12 +617,12 @@ const CategoryTab = () => {
         });
     };
 
-    // ── Save category ──────────────────────────────────────────────────────
+    // ── Save collection ────────────────────────────────────────────────────
 
     const handleRevert = () => {
-        if (!selectedCategory) return;
-        setEditName(selectedCategory.categoryName);
-        setEditFields((selectedCategory.fields || []).filter(f => !SYSTEM_FIELD_KEYS.has(f.field)));
+        if (!selectedCollection) return;
+        setEditName(selectedCollection.collectionName);
+        setEditFields((selectedCollection.fields || []).filter(f => !SYSTEM_FIELD_KEYS.has(f.field)));
     };
 
     const handleSave = async () => {
@@ -635,97 +635,97 @@ const CategoryTab = () => {
         }
         setSaving(true);
         try {
-            const systemFields = (selectedCategory.fields || []).filter(f => SYSTEM_FIELD_KEYS.has(f.field));
-            const res = await api.put(`/api/ui/leads/categories/${selectedId}`, {
-                categoryName: editName,
-                fields:       [...systemFields, ...editFields.map(f => ({ label: f.label.trim(), type: f.type }))]
+            const systemFields = (selectedCollection.fields || []).filter(f => SYSTEM_FIELD_KEYS.has(f.field));
+            const res = await api.put(`/api/ui/leads/collections/${selectedId}`, {
+                collectionName: editName,
+                fields:         [...systemFields, ...editFields.map(f => ({ label: f.label.trim(), type: f.type }))]
             }, { params: { acctId } });
 
             const updated = res.data?.data;
             const annotatedUpd = { ...updated, fields: (updated.fields || []).map(f => SYSTEM_FIELD_KEYS.has(f.field) ? { ...f, system: true } : f) };
-            setSelectedCategory(annotatedUpd);
-            setEditName(updated.categoryName);
+            setSelectedCollection(annotatedUpd);
+            setEditName(updated.collectionName);
             setEditFields((updated.fields || []).filter(f => !SYSTEM_FIELD_KEYS.has(f.field)));
 
             // Refresh list in case name changed
-            setCategories(prev => prev.map(c =>
-                c._id === selectedId ? { ...c, categoryName: updated.categoryName } : c
+            setCollections(prev => prev.map(c =>
+                c._id === selectedId ? { ...c, collectionName: updated.collectionName } : c
             ));
-            showSuccess('Category saved successfully.');
+            showSuccess('Collection saved successfully.');
         } catch (err) {
-            showError(err.response?.data?.message || 'Failed to save category.');
+            showError(err.response?.data?.message || 'Failed to save collection.');
         } finally {
             setSaving(false);
         }
     };
 
-    // Keep the selected category's stages in sync after a stage CRUD operation,
+    // Keep the selected collection's stages in sync after a stage CRUD operation,
     // and mirror them into the lightweight list so the grid/other tabs stay current.
     const handleStagesChange = (stages) => {
-        setSelectedCategory(prev => prev ? { ...prev, stages } : prev);
-        setCategories(prev => prev.map(c => c._id === selectedId ? { ...c, stages } : c));
+        setSelectedCollection(prev => prev ? { ...prev, stages } : prev);
+        setCollections(prev => prev.map(c => c._id === selectedId ? { ...c, stages } : c));
     };
 
-    // ── Delete category ────────────────────────────────────────────────────
+    // ── Delete collection ──────────────────────────────────────────────────
 
-    const handleDeleteCategory = async () => {
+    const handleDeleteCollection = async () => {
         if (!selectedId) return;
         setDeleteLoading(true);
         try {
-            await api.delete(`/api/ui/leads/categories/${selectedId}`, { params: { acctId } });
-            const remaining = categories.filter(c => c._id !== selectedId);
-            setCategories(remaining);
+            await api.delete(`/api/ui/leads/collections/${selectedId}`, { params: { acctId } });
+            const remaining = collections.filter(c => c._id !== selectedId);
+            setCollections(remaining);
             setShowDeleteDialog(false);
             setSelectedId(remaining.length > 0 ? remaining[0]._id : null);
-            setSelectedCategory(null);
-            showSuccess('Category deleted.');
+            setSelectedCollection(null);
+            showSuccess('Collection deleted.');
         } catch (err) {
-            showError(err.response?.data?.message || 'Failed to delete category.');
+            showError(err.response?.data?.message || 'Failed to delete collection.');
         } finally {
             setDeleteLoading(false);
         }
     };
 
-    // ── Create category ────────────────────────────────────────────────────
+    // ── Create collection ──────────────────────────────────────────────────
 
     const handleCreate = async (normalisedName) => {
         setCreateSaving(true);
         try {
-            const res = await api.post('/api/ui/leads/categories', {
-                categoryName: normalisedName,
+            const res = await api.post('/api/ui/leads/collections', {
+                collectionName: normalisedName,
                 fields: []
             }, { params: { acctId } });
             const created = res.data?.data;
-            setCategories(prev => [...prev, { _id: created._id, categoryName: created.categoryName, default: created.default, stages: created.stages || [] }]);
+            setCollections(prev => [...prev, { _id: created._id, collectionName: created.collectionName, default: created.default, stages: created.stages || [] }]);
             setSelectedId(created._id);
-            setShowNewCategoryDialog(false);
-            showSuccess(`Category "${created.categoryName}" created.`);
+            setShowNewCollectionDialog(false);
+            showSuccess(`Collection "${created.collectionName}" created.`);
         } catch (err) {
-            showError(err.response?.data?.message || 'Failed to create category.');
+            showError(err.response?.data?.message || 'Failed to create collection.');
         } finally {
             setCreateSaving(false);
         }
     };
 
-    // ── Rename category ────────────────────────────────────────────────────
+    // ── Rename collection ──────────────────────────────────────────────────
 
     const handleRename = async (normalisedName) => {
         if (!selectedId) return;
         setSaving(true);
         try {
-            const res = await api.put(`/api/ui/leads/categories/${selectedId}`, {
-                categoryName: normalisedName
+            const res = await api.put(`/api/ui/leads/collections/${selectedId}`, {
+                collectionName: normalisedName
             }, { params: { acctId } });
             const updated = res.data?.data;
-            setEditName(updated.categoryName);
-            setSelectedCategory(prev => prev ? { ...prev, categoryName: updated.categoryName } : prev);
-            setCategories(prev => prev.map(c =>
-                c._id === selectedId ? { ...c, categoryName: updated.categoryName } : c
+            setEditName(updated.collectionName);
+            setSelectedCollection(prev => prev ? { ...prev, collectionName: updated.collectionName } : prev);
+            setCollections(prev => prev.map(c =>
+                c._id === selectedId ? { ...c, collectionName: updated.collectionName } : c
             ));
             setShowRenameDialog(false);
-            showSuccess('Category renamed.');
+            showSuccess('Collection renamed.');
         } catch (err) {
-            showError(err.response?.data?.message || 'Failed to rename category.');
+            showError(err.response?.data?.message || 'Failed to rename collection.');
         } finally {
             setSaving(false);
         }
@@ -733,17 +733,17 @@ const CategoryTab = () => {
 
     // ── Derived state ──────────────────────────────────────────────────────
 
-    const hasUnsavedChanges = selectedCategory && (
-        editName !== selectedCategory.categoryName ||
+    const hasUnsavedChanges = selectedCollection && (
+        editName !== selectedCollection.collectionName ||
         JSON.stringify(editFields.map(f => ({ field: f.field, label: f.label, type: f.type }))) !==
-        JSON.stringify((selectedCategory.fields || []).filter(f => !SYSTEM_FIELD_KEYS.has(f.field)).map(f => ({ field: f.field, label: f.label, type: f.type })))
+        JSON.stringify((selectedCollection.fields || []).filter(f => !SYSTEM_FIELD_KEYS.has(f.field)).map(f => ({ field: f.field, label: f.label, type: f.type })))
     );
 
-    // Combine system fields from selectedCategory + current user editFields for modal
-    const categoryForApiInfo = selectedCategory ? {
-        ...selectedCategory,
+    // Combine system fields from selectedCollection + current user editFields for modal
+    const collectionForApiInfo = selectedCollection ? {
+        ...selectedCollection,
         fields: [
-            ...(selectedCategory.fields || []).filter(f => SYSTEM_FIELD_KEYS.has(f.field)),
+            ...(selectedCollection.fields || []).filter(f => SYSTEM_FIELD_KEYS.has(f.field)),
             ...editFields,
         ]
     } : null;
@@ -754,13 +754,13 @@ const CategoryTab = () => {
         <div className="flex gap-6 min-h-[480px]">
             <NotificationComponent />
 
-            {/* ── Left sidebar: category list ──────────────────────────── */}
+            {/* ── Left sidebar: collection list ────────────────────────── */}
             <div className="w-52 flex-shrink-0 flex flex-col gap-2">
                 <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">Categories</span>
-                    <Tooltip content="Add new category" placement="top">
+                    <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">Collections</span>
+                    <Tooltip content="Add new collection" placement="top">
                         <button
-                            onClick={() => setShowNewCategoryDialog(true)}
+                            onClick={() => setShowNewCollectionDialog(true)}
                             className="w-6 h-6 flex items-center justify-center rounded-md bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
                         >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -774,23 +774,23 @@ const CategoryTab = () => {
                     <div className="flex justify-center py-6">
                         <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-300 border-t-indigo-600" />
                     </div>
-                ) : categories.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-4">No categories yet</p>
+                ) : collections.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-4">No collections yet</p>
                 ) : (
                     <ul className="space-y-1">
-                        {categories.map(cat => (
-                            <li key={cat._id}>
+                        {collections.map(col => (
+                            <li key={col._id}>
                                 <button
-                                    onClick={() => setSelectedId(cat._id)}
+                                    onClick={() => setSelectedId(col._id)}
                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors truncate ${
-                                        selectedId === cat._id
+                                        selectedId === col._id
                                             ? 'bg-indigo-600 text-white'
                                             : 'text-gray-700 hover:bg-gray-100'
                                     }`}
                                 >
-                                    {cat.categoryName}
-                                    {cat.default && (
-                                        <span className={`ml-1.5 text-[9px] font-semibold uppercase ${selectedId === cat._id ? 'text-indigo-200' : 'text-indigo-400'}`}>
+                                    {col.collectionName}
+                                    {col.default && (
+                                        <span className={`ml-1.5 text-[9px] font-semibold uppercase ${selectedId === col._id ? 'text-indigo-200' : 'text-indigo-400'}`}>
                                             default
                                         </span>
                                     )}
@@ -801,23 +801,23 @@ const CategoryTab = () => {
                 )}
             </div>
 
-            {/* ── Right panel: category detail ─────────────────────────── */}
+            {/* ── Right panel: collection detail ───────────────────────── */}
             <div className="flex-1 min-w-0">
                 {!selectedId ? (
                     <div className="flex items-center justify-center h-full text-gray-400 text-xs">
-                        Select a category or create a new one.
+                        Select a collection or create a new one.
                     </div>
                 ) : loadingDetail ? (
                     <div className="flex justify-center py-10">
                         <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-indigo-600" />
                     </div>
-                ) : selectedCategory ? (
+                ) : selectedCollection ? (
                     <div className="flex flex-col gap-4">
                         {/* Header row */}
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                             <div className="flex items-center gap-1.5">
-                                <h3 className="text-sm font-bold text-gray-900">{selectedCategory.categoryName}</h3>
-                                <Tooltip content="Rename category" placement="top">
+                                <h3 className="text-sm font-bold text-gray-900">{selectedCollection.collectionName}</h3>
+                                <Tooltip content="Rename collection" placement="top">
                                     <button
                                         onClick={() => setShowRenameDialog(true)}
                                         className="group relative w-7 h-7 flex items-center justify-center bg-transparent rounded-md hover:bg-blue-50 transition-all duration-200 border border-gray-300 hover:border-blue-300 focus:ring-1 focus:ring-blue-300"
@@ -827,7 +827,7 @@ const CategoryTab = () => {
                                         </svg>
                                     </button>
                                 </Tooltip>
-                                <Tooltip content="Delete category" placement="top">
+                                <Tooltip content="Delete collection" placement="top">
                                     <button
                                         onClick={() => setShowDeleteDialog(true)}
                                         className="group relative w-7 h-7 flex items-center justify-center bg-transparent rounded-md hover:bg-red-50 transition-all duration-200 border border-gray-300 hover:border-red-300 focus:ring-1 focus:ring-red-300"
@@ -893,7 +893,7 @@ const CategoryTab = () => {
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-100">
                                     {/* System fields — always locked, shown first */}
-                                    {(selectedCategory.fields || []).filter(f => SYSTEM_FIELD_KEYS.has(f.field)).map(field => (
+                                    {(selectedCollection.fields || []).filter(f => SYSTEM_FIELD_KEYS.has(f.field)).map(field => (
                                         <FieldRow
                                             key={field.field}
                                             field={field}
@@ -938,8 +938,8 @@ const CategoryTab = () => {
                         {/* Lead stages */}
                         <StagesEditor
                             acctId={acctId}
-                            categoryId={selectedId}
-                            stages={selectedCategory.stages || []}
+                            collectionId={selectedId}
+                            stages={selectedCollection.stages || []}
                             onStagesChange={handleStagesChange}
                             showSuccess={showSuccess}
                             showError={showError}
@@ -949,16 +949,16 @@ const CategoryTab = () => {
             </div>
 
             {/* ── Dialogs ───────────────────────────────────────────────── */}
-            {showNewCategoryDialog && (
-                <CategoryNameDialog
+            {showNewCollectionDialog && (
+                <CollectionNameDialog
                     onSave={handleCreate}
-                    onClose={() => setShowNewCategoryDialog(false)}
+                    onClose={() => setShowNewCollectionDialog(false)}
                     saving={createSaving}
                 />
             )}
 
             {showRenameDialog && (
-                <CategoryNameDialog
+                <CollectionNameDialog
                     initial={editName}
                     onSave={handleRename}
                     onClose={() => setShowRenameDialog(false)}
@@ -968,14 +968,14 @@ const CategoryTab = () => {
 
             {showApiInfo && (
                 <ApiInfoModal
-                    category={categoryForApiInfo}
+                    collection={collectionForApiInfo}
                     acctNo={acctNo}
                     acctId={acctId}
                     onClose={() => setShowApiInfo(false)}
                 />
             )}
 
-            {showDeleteDialog && selectedCategory && (
+            {showDeleteDialog && selectedCollection && (
                 <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleteLoading && setShowDeleteDialog(false)} />
                     <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-sm p-6 flex flex-col gap-4">
@@ -990,15 +990,15 @@ const CategoryTab = () => {
 
                         {/* Title */}
                         <div className="text-center">
-                            <h3 className="text-sm font-bold text-gray-900">Delete Category</h3>
+                            <h3 className="text-sm font-bold text-gray-900">Delete Collection</h3>
                             <p className="text-xs text-gray-500 mt-1">
-                                "{selectedCategory.categoryName}"
+                                "{selectedCollection.collectionName}"
                             </p>
                         </div>
 
                         {/* Warning */}
                         <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-xs text-red-800">
-                            This will also delete <strong>all leads</strong> in this category.
+                            This will also delete <strong>all leads</strong> in this collection.
                             This action <strong>cannot be recovered</strong>.
                         </div>
 
@@ -1016,7 +1016,7 @@ const CategoryTab = () => {
                             <Button
                                 size="sm"
                                 variant="danger"
-                                onClick={handleDeleteCategory}
+                                onClick={handleDeleteCollection}
                                 disabled={deleteLoading}
                                 loading={deleteLoading}
                             >
@@ -1169,4 +1169,4 @@ const FieldRow = ({ field, index, onChange, onRemove, onReorder, totalFields }) 
     );
 };
 
-export default CategoryTab;
+export default CollectionTab;
