@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
@@ -16,6 +17,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import Button from '../components/ui/Button';
 import AiAnalyticsChat from '../components/AiAnalyticsChat';
+import AppNavbar from '../components/AppNavbar';
 
 // ── Controlled dimension input for width/height ──
 const DimensionInput = ({ value, onCommit, min, max, className }) => {
@@ -83,6 +85,20 @@ const AnalyticsDashboardPage = () => {
     const [headerVisible, setHeaderVisible] = useState(true);
     const lastScrollY = useRef(0);
     const inactivityTimer = useRef(null);
+
+    // Global navbar height — so the analytics sub-header pins right below it (both are sticky)
+    const navWrapRef = useRef(null);
+    const [navHeight, setNavHeight] = useState(0);
+    useEffect(() => {
+        const el = navWrapRef.current;
+        if (!el) return;
+        const measure = () => setNavHeight(el.offsetHeight);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        window.addEventListener('resize', measure);
+        return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+    }, []);
 
     // View As — admin selector
     const [viewAsAdmins, setViewAsAdmins] = useState([]);
@@ -1594,10 +1610,17 @@ const AnalyticsDashboardPage = () => {
             try {
                 const response = await api.get(`/api/ui/leads/collections/${catId}/fields`, { params: { acctId } });
                 const rawFields = response.data?.data?.fields || [];
+                const present = new Set(rawFields.map(f => f.field));
 
-                // Append system timestamp fields as column options
+                // Ensure the selectable system axes (responsible, stage) are always
+                // available for charts, even when the collection stored its fields
+                // without them — otherwise a saved xAxis/yAxis of "responsible"/"stage"
+                // has no matching option on reload and appears to not persist.
                 const allFields = [
                     ...rawFields,
+                    ...(!present.has('responsible') ? [{ field: 'responsible', label: 'Responsible', type: 'text', system: true }] : []),
+                    ...(!present.has('stage') ? [{ field: 'stage', label: 'Stage', type: 'stage', system: true }] : []),
+                    // Append system timestamp fields as column options
                     { field: 'createdAt', label: 'Created At', type: 'date' },
                     { field: 'updatedAt', label: 'Updated At', type: 'date' },
                 ];
@@ -1730,7 +1753,8 @@ const AnalyticsDashboardPage = () => {
         const anchor = goRight ? 'start' : 'end';
         const tx = ex + (goRight ? 4 : -4);
 
-        const rawName = lbl(name);
+        const resolved = lbl(name);
+        const rawName = resolved == null || resolved === '' ? '\u2014' : String(resolved);
         const maxLen = 15;
         const displayName = rawName.length > maxLen ? rawName.slice(0, maxLen - 1) + '\u2026' : rawName;
         const pct = (percent * 100).toFixed(1);
@@ -1749,7 +1773,7 @@ const AnalyticsDashboardPage = () => {
                 </text>
                 <text x={tx} y={ey + 8} textAnchor={anchor}
                     fill="#64748b" fontSize={9}>
-                    {value.toLocaleString()} ({pct}%)
+                    {(value ?? 0).toLocaleString()} ({pct}%)
                 </text>
             </g>
         );
@@ -2419,10 +2443,12 @@ const AnalyticsDashboardPage = () => {
                 onClick={handleClick}
                 disabled={!isChartConfigured(mergedConfig) || (!isDirty && !isLoading)}
                 className={`btn-update flex items-center justify-center px-4 py-2.5 rounded-lg text-xs font-semibold
-                    bg-gradient-to-r from-indigo-600 to-violet-600 text-white
-                    shadow-md shadow-indigo-500/30
-                    transition-shadow duration-200
-                    ${isLoading ? 'cursor-wait' : !isDirty && !isSuccess ? 'cursor-not-allowed' : 'hover:shadow-indigo-500/50'}
+                    text-white transition-shadow duration-200
+                    ${showGray
+                        ? 'cursor-not-allowed shadow-none bg-none bg-gray-100'
+                        : isLoading
+                            ? 'cursor-wait bg-gradient-to-r from-indigo-600 to-violet-600 shadow-md shadow-indigo-500/30'
+                            : 'bg-gradient-to-r from-indigo-600 to-violet-600 shadow-md shadow-indigo-500/30 hover:shadow-indigo-500/50'}
                     ${isSuccess ? 'btn-update-success-ring' : ''}
                 `}
                 title={!isChartConfigured(mergedConfig)
@@ -2443,7 +2469,7 @@ const AnalyticsDashboardPage = () => {
                 />
                 {/* Content — re-keyed so animate-btn-state fires on every state change */}
                 <span key={contentKey} className="animate-btn-state relative flex items-center gap-1.5"
-                    style={{ color: showGray ? '#9ca3af' : 'white' }}>
+                    style={{ color: showGray ? '#6b7280' : 'white' }}>
                     {isLoading ? (
                         <>
                             <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
@@ -2480,6 +2506,19 @@ const AnalyticsDashboardPage = () => {
             value: f.field,
             label: f.label
         }));
+
+        // Guarantee the chart's currently-selected axes always appear as options, even
+        // if the fetched field list doesn't (yet) contain them — e.g. AI-created charts
+        // using "responsible"/"stage", or a collection whose fields haven't cached. This
+        // prevents the X/Y axis dropdowns from rendering empty for a configured chart.
+        const ensureAxisOption = (axis) => {
+            if (axis?.value && !columns.some(o => o.value === axis.value)) {
+                columns.push({ value: axis.value, label: axis.label || axis.value });
+            }
+        };
+        ensureAxisOption(mergedConfig.xAxis);
+        ensureAxisOption(mergedConfig.yAxis);
+        ensureAxisOption(mergedConfig.zAxis);
 
         const toISO = (d) => {
             const y = d.getFullYear();
@@ -2775,7 +2814,13 @@ const AnalyticsDashboardPage = () => {
                     })()}
                 </div>
 
-                {/* ── All controls — slides in when near top ── */}
+                {/* ── All controls — slides in when near top ──
+                    Portaled to <body>: this panel is `position: fixed` with viewport coords
+                    (top/left/width from getBoundingClientRect). The chart card runs an
+                    `animate-scale-in` animation (fill-mode both) which keeps the card under
+                    transform control — that makes the card a containing block for fixed
+                    descendants and offsets/clips this panel. Rendering into <body> escapes it. */}
+                {createPortal(
                 <div
                     key={filterHideCount}
                     className={`fixed bg-white z-[200] border border-gray-200 shadow-xl rounded-b-xl origin-top flex flex-col overflow-hidden
@@ -3215,6 +3260,7 @@ const AnalyticsDashboardPage = () => {
                         </div>
                     )}
                 </div>
+                , document.body)}
 
                 {/* Chart Display — fills remaining space */}
                 <div
@@ -3293,6 +3339,10 @@ const AnalyticsDashboardPage = () => {
 
     return (
         <>
+            <div ref={navWrapRef} className="sticky top-0 z-40">
+                <AppNavbar activePage="visualize" />
+            </div>
+
             {/* ── Save-warning modal: rendered at page root so it's never clipped by toolbar layout ── */}
             {saveWarningOpen && (
                 <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
@@ -3380,22 +3430,117 @@ const AnalyticsDashboardPage = () => {
             <div className="min-h-screen bg-gray-50 relative">
                 <LoadingMask loading={!chartsReady} title="Loading..." message="Please wait while we fetch your data" />
                 <div
-                    className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30"
+                    className="bg-white border-b border-gray-200 shadow-sm sticky z-30"
                     style={{
+                        top: navHeight,
                         transform: headerVisible ? 'translateY(0)' : 'translateY(-110%)',
                         transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
                     }}
                 >
                     <div className="w-full px-6 py-2">
                         <div className="flex justify-between items-center">
-                            <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                                <div className="group relative w-8 h-8 bg-transparent rounded-lg flex items-center justify-center border border-gray-300 hover:bg-blue-50 hover:border-blue-500 transition-all duration-300 hover:scale-110 focus:ring-1 focus:ring-blue-400">
-                                    <svg className="w-4 h-4 text-gray-600 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                    </svg>
-                                </div>
-                                Analytics Dashboard
-                            </h1>
+                            {/* View As dropdown — left of the header row */}
+                            <div ref={viewAsRef} className="relative">
+                                <UITooltip content="View As" placement="bottom">
+                                    <button
+                                        onClick={() => setViewAsOpen(o => !o)}
+                                        className="inline-flex items-center justify-between gap-1.5 h-8 w-max min-w-[9rem] px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all text-xs font-medium"
+                                    >
+                                        {viewAsAdmin ? (
+                                            getAdminAvatar(viewAsAdmin) && !viewAsAvatarError ? (
+                                                <img
+                                                    src={getAdminAvatar(viewAsAdmin)}
+                                                    alt=""
+                                                    className="w-5 h-5 rounded-full object-cover flex-shrink-0"
+                                                    onError={() => setViewAsAvatarError(true)}
+                                                />
+                                            ) : (
+                                                <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(viewAsAdmin) }}>
+                                                    {getAdminInitials(viewAsAdmin)}
+                                                </span>
+                                            )
+                                        ) : (
+                                            <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                        )}
+                                        <span className="whitespace-nowrap">
+                                            {viewAsAdmin ? getAdminDisplayName(viewAsAdmin) : 'View As'}
+                                        </span>
+                                        <svg className={`w-3 h-3 text-gray-400 transition-transform ${viewAsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+                                </UITooltip>
+                                {viewAsOpen && (
+                                    <div className="absolute left-0 top-full mt-1 min-w-full w-max bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 max-h-64 overflow-y-auto">
+                                        {(() => {
+                                            const currentUserAdminId = localStorage.getItem('currentUserAdmin');
+                                            const me = viewAsAdmins.find(a => String(a.userId || '') === currentUserAdminId);
+                                            const others = viewAsAdmins.filter(a => String(a.userId || '') !== currentUserAdminId);
+
+                                            const renderAdminBtn = (admin, idx) => {
+                                                const adminUserId = String(admin.userId || '');
+                                                const selectedUserId = String(viewAsAdmin?.userId || '');
+                                                const isSelected = adminUserId && adminUserId === selectedUserId;
+                                                const isMe = adminUserId === currentUserAdminId;
+                                                return (
+                                                    <button
+                                                        key={admin.userId || admin._id || idx}
+                                                        onClick={() => !isSelected && handleViewAsChange(admin)}
+                                                        disabled={isSelected}
+                                                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors
+                                                        ${isSelected
+                                                                ? 'font-semibold text-gray-900 bg-gray-100 cursor-not-allowed opacity-60'
+                                                                : 'text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer'
+                                                            }`}
+                                                    >
+                                                        {getAdminAvatar(admin) ? (
+                                                            <>
+                                                                <img
+                                                                    src={getAdminAvatar(admin)}
+                                                                    alt=""
+                                                                    className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                                                                    onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }}
+                                                                />
+                                                                <span style={{ display: 'none', background: getAdminColor(admin) }} className="w-6 h-6 rounded-full items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
+                                                                    {getAdminInitials(admin)}
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(admin) }}>
+                                                                {getAdminInitials(admin)}
+                                                            </span>
+                                                        )}
+                                                        <span className="truncate flex-1">{getAdminDisplayName(admin)}</span>
+                                                        {isMe && !isSelected && (
+                                                            <span className="text-[9px] font-semibold text-indigo-500 bg-indigo-50 border border-indigo-200 rounded px-1 py-0.5 flex-shrink-0">You</span>
+                                                        )}
+                                                        {isSelected && (
+                                                            <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                );
+                                            };
+
+                                            return (
+                                                <>
+                                                    {me && renderAdminBtn(me, 'me')}
+                                                    {me && others.length > 0 && (
+                                                        <div className="my-1 border-t border-gray-100" />
+                                                    )}
+                                                    {others.map((admin, idx) => renderAdminBtn(admin, idx))}
+                                                    {viewAsAdmins.length === 0 && (
+                                                        <p className="px-3 py-2 text-xs text-gray-400">No admins found</p>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                )}
+                            </div>
                             <div className="flex items-center gap-2">
                                 {/* Create with AI button — hidden when viewing another admin */}
                                 {!isViewingOtherAdmin && (
@@ -3497,108 +3642,6 @@ const AnalyticsDashboardPage = () => {
                                         </button>
                                     </UITooltip>
                                 )}
-                                {/* View As dropdown */}
-                                <div ref={viewAsRef} className="relative">
-                                    <UITooltip content="View As" placement="bottom">
-                                        <button
-                                            onClick={() => setViewAsOpen(o => !o)}
-                                            className="inline-flex items-center justify-between gap-1.5 h-8 w-max min-w-[9rem] px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all text-xs font-medium"
-                                        >
-                                            {viewAsAdmin ? (
-                                                getAdminAvatar(viewAsAdmin) && !viewAsAvatarError ? (
-                                                    <img
-                                                        src={getAdminAvatar(viewAsAdmin)}
-                                                        alt=""
-                                                        className="w-5 h-5 rounded-full object-cover flex-shrink-0"
-                                                        onError={() => setViewAsAvatarError(true)}
-                                                    />
-                                                ) : (
-                                                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(viewAsAdmin) }}>
-                                                        {getAdminInitials(viewAsAdmin)}
-                                                    </span>
-                                                )
-                                            ) : (
-                                                <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                                </svg>
-                                            )}
-                                            <span className="whitespace-nowrap">
-                                                {viewAsAdmin ? getAdminDisplayName(viewAsAdmin) : 'View As'}
-                                            </span>
-                                            <svg className={`w-3 h-3 text-gray-400 transition-transform ${viewAsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                        </button>
-                                    </UITooltip>
-                                    {viewAsOpen && (
-                                        <div className="absolute right-0 top-full mt-1 min-w-full w-max bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 max-h-64 overflow-y-auto">
-                                            {(() => {
-                                                const currentUserAdminId = localStorage.getItem('currentUserAdmin');
-                                                const me = viewAsAdmins.find(a => String(a.userId || '') === currentUserAdminId);
-                                                const others = viewAsAdmins.filter(a => String(a.userId || '') !== currentUserAdminId);
-
-                                                const renderAdminBtn = (admin, idx) => {
-                                                    const adminUserId = String(admin.userId || '');
-                                                    const selectedUserId = String(viewAsAdmin?.userId || '');
-                                                    const isSelected = adminUserId && adminUserId === selectedUserId;
-                                                    const isMe = adminUserId === currentUserAdminId;
-                                                    return (
-                                                        <button
-                                                            key={admin.userId || admin._id || idx}
-                                                            onClick={() => !isSelected && handleViewAsChange(admin)}
-                                                            disabled={isSelected}
-                                                            className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors
-                                                            ${isSelected
-                                                                    ? 'font-semibold text-gray-900 bg-gray-100 cursor-not-allowed opacity-60'
-                                                                    : 'text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer'
-                                                                }`}
-                                                        >
-                                                            {getAdminAvatar(admin) ? (
-                                                                <>
-                                                                    <img
-                                                                        src={getAdminAvatar(admin)}
-                                                                        alt=""
-                                                                        className="w-6 h-6 rounded-full object-cover flex-shrink-0"
-                                                                        onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }}
-                                                                    />
-                                                                    <span style={{ display: 'none', background: getAdminColor(admin) }} className="w-6 h-6 rounded-full items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
-                                                                        {getAdminInitials(admin)}
-                                                                    </span>
-                                                                </>
-                                                            ) : (
-                                                                <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(admin) }}>
-                                                                    {getAdminInitials(admin)}
-                                                                </span>
-                                                            )}
-                                                            <span className="truncate flex-1">{getAdminDisplayName(admin)}</span>
-                                                            {isMe && !isSelected && (
-                                                                <span className="text-[9px] font-semibold text-indigo-500 bg-indigo-50 border border-indigo-200 rounded px-1 py-0.5 flex-shrink-0">You</span>
-                                                            )}
-                                                            {isSelected && (
-                                                                <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                                                </svg>
-                                                            )}
-                                                        </button>
-                                                    );
-                                                };
-
-                                                return (
-                                                    <>
-                                                        {me && renderAdminBtn(me, 'me')}
-                                                        {me && others.length > 0 && (
-                                                            <div className="my-1 border-t border-gray-100" />
-                                                        )}
-                                                        {others.map((admin, idx) => renderAdminBtn(admin, idx))}
-                                                        {viewAsAdmins.length === 0 && (
-                                                            <p className="px-3 py-2 text-xs text-gray-400">No admins found</p>
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
-                                        </div>
-                                    )}
-                                </div>
                             </div>
                         </div>
                     </div>

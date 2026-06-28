@@ -55,12 +55,15 @@ const CheckIcon = () => (
 /**
  * @param {object}   reminder         - Reminder document from the API
  * @param {boolean}  canManage        - Whether the current user may edit/delete (current assignee)
+ * @param {boolean}  isSuperAdmin     - Superadmins may edit/delete any reminder (incl. past/sent)
  * @param {function} onEdit(reminder) - Open edit form for this reminder
  * @param {function} onDelete(id)     - Delete this reminder
  */
-export default function ReminderCard({ reminder, canManage, onEdit, onDelete }) {
+export default function ReminderCard({ reminder, canManage, isSuperAdmin = false, onEdit, onDelete }) {
     const isSent  = reminder.mainSent;
     const isPast  = isSent || new Date(reminder.scheduledAt) <= new Date();
+    // Assignee can manage only pending reminders; superadmins can manage any reminder
+    const showActions = isSuperAdmin || (canManage && !isPast);
 
     return (
         <div className={`reminder-card${isPast ? ' reminder-card--past' : ' reminder-card--upcoming'}`}>
@@ -105,8 +108,8 @@ export default function ReminderCard({ reminder, canManage, onEdit, onDelete }) 
                 </div>
             </div>
 
-            {/* Footer — only the current assignee, and only while pending (future, unsent) */}
-            {canManage && !isPast && (
+            {/* Footer — assignee while pending, or a superadmin for any reminder */}
+            {showActions && (
                 <div className="reminder-card__footer">
                     <button
                         className="note-card__action-btn note-card__action-btn--edit"

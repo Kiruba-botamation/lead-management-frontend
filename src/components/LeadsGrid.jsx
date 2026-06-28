@@ -1026,7 +1026,8 @@ const LeadsGrid = () => {
     const [responsibleFilter, setResponsibleFilter] = useState('');
     useEffect(() => {
         if (!acctId) { setAdminsList([]); return; }
-        api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } })
+        // roster=1 → full account roster so any admin can assign a lead to another admin
+        api.get('/api/ui/admins/list', { params: { acctId, limit: 200, roster: 1 } })
             .then(res => {
                 const raw = res.data;
                 const list = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
@@ -1852,7 +1853,7 @@ const LeadsGrid = () => {
                                     onCreate={() => navigate('/settings')}
                                     disabled={collectionLoading || !acctId}
                                 />
-                                {selectedCollection && (() => {
+                                {selectedCollection && isSuperAdmin && (() => {
                                     const activeCat = collections.find(c => c._id === selectedCollection);
                                     return activeCat ? (
                                         <Tooltip content={`Delete collection "${activeCat.collectionName}"`} placement="top">
@@ -2028,16 +2029,6 @@ const LeadsGrid = () => {
                                         )}
                                     </button>
                                 </Tooltip>
-                                <Tooltip content="Open Analytics" placement="top">
-                                    <button
-                                        onClick={() => window.open('/analytics', '_blank')}
-                                        className="group relative w-8 h-8 bg-transparent rounded-lg hover:bg-blue-50 transition-all duration-300 flex items-center justify-center hover:scale-110 border border-gray-300 hover:border-blue-500 focus:ring-1 focus:ring-blue-400"
-                                    >
-                                        <svg className="w-4 h-4 text-gray-600 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                        </svg>
-                                    </button>
-                                </Tooltip>
                             </div>
 
                             <div className="w-px h-6 bg-gray-200 mx-1.5" />
@@ -2208,11 +2199,14 @@ const LeadsGrid = () => {
                                                                                 </svg>
                                                                             </button>
                                                                         </Tooltip>
-                                                                        <Tooltip content="Delete lead" placement="top">
-                                                                            <button onClick={() => handleDeleteOpen(lead._id)} className="group relative w-6 h-6 flex items-center justify-center bg-transparent rounded-md hover:bg-red-50 transition-all duration-200 hover:scale-110 border border-gray-300 hover:border-red-300 focus:ring-1 focus:ring-red-300">
-                                                                                <svg className="w-3.5 h-3.5 text-gray-400 group-hover:text-red-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                                            </button>
-                                                                        </Tooltip>
+                                                                        {/* Deleting a lead is restricted to super admins */}
+                                                                        {isSuperAdmin && (
+                                                                            <Tooltip content="Delete lead" placement="top">
+                                                                                <button onClick={() => handleDeleteOpen(lead._id)} className="group relative w-6 h-6 flex items-center justify-center bg-transparent rounded-md hover:bg-red-50 transition-all duration-200 hover:scale-110 border border-gray-300 hover:border-red-300 focus:ring-1 focus:ring-red-300">
+                                                                                    <svg className="w-3.5 h-3.5 text-gray-400 group-hover:text-red-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                                </button>
+                                                                            </Tooltip>
+                                                                        )}
                                                                     </div>
                                                                 </td>
                                                             </tr>
@@ -2312,6 +2306,7 @@ const LeadsGrid = () => {
                                         leadPhone={String(activityLead['phone'] || '')}
                                         initialTab={activityTab}
                                         currentAdminId={currentUserId}
+                                        isSuperAdmin={isSuperAdmin}
                                         currentUser={
                                             // Priority: chatbotAdmin (from account_admins — has firstName, lastName, profileImage)
                                             // Fallback: userDetails (from auth service profile)

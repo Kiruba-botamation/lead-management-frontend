@@ -74,6 +74,7 @@ export default function LeadActivityPanel({
     leadPhone     = '',
     initialTab    = 'notes',
     currentAdminId,
+    isSuperAdmin  = false, // superadmins may edit/delete any note/reminder on the lead
     currentUser,          // { name, profileImageUrl } from AuthContext.userDetails
     adminHasPhone = false,
     onClose,
@@ -291,6 +292,7 @@ export default function LeadActivityPanel({
                                     key={note._id}
                                     note={note}
                                     currentAdminId={currentAdminId}
+                                    isSuperAdmin={isSuperAdmin}
                                     onEdit={handleNoteEdit}
                                     onDelete={handleNoteDelete}
                                 />
@@ -340,6 +342,7 @@ export default function LeadActivityPanel({
                                     reminder={rem}
                                     // Current assignee (or creator when the lead is unassigned) may manage it
                                     canManage={currentAdminId === (lead?.responsible || rem.userId)}
+                                    isSuperAdmin={isSuperAdmin}
                                     onEdit={handleReminderEdit}
                                     onDelete={handleReminderDelete}
                                 />

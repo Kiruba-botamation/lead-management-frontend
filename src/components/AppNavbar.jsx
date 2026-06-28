@@ -18,10 +18,18 @@ import { Dropdown, DropdownItem, DropdownSeparator } from './ui/Dropdown';
 import BrandLogo from './BrandLogo';
 import AccountCombobox from './AccountCombobox';
 import NotificationBell from './NotificationBell';
+import ReminderCalendar from './ReminderCalendar';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 
 /* ── Nav link icon helpers ─────────────────────────────────────────── */
+
+const IconVisualize = () => (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+);
 
 const IconLeads = () => (
     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -62,7 +70,7 @@ const IconLogout = () => (
 /* ── Main component ────────────────────────────────────────────────── */
 
 /**
- * @param {string}   activePage    – one of: 'leads' | 'admin' | 'settings' | ''
+ * @param {string}   activePage    – one of: 'visualize' | 'leads' | 'admin' | 'settings' | ''
  * @param {function} onAccountOpen – callback fired when AccountCombobox opens
  *                                   (so sibling dropdowns can close)
  * @param {number}   firedCount    – unread fired-reminder count for the bell badge
@@ -72,6 +80,7 @@ export default function AppNavbar({ activePage = '', onAccountOpen, firedCount =
     const navigate = useNavigate();
     const { user, userDetails, logout, accessLevel } = useAuth();
     const isSuperadmin = accessLevel === 'superadmin';
+    const isAdmin = accessLevel === 'superadmin' || accessLevel === 'admin';
     const {
         acctNo, acctId, acctName, accounts,
         isAccountLinked, accountsLoaded,
@@ -156,37 +165,45 @@ export default function AppNavbar({ activePage = '', onAccountOpen, firedCount =
                 <HeaderNav>
                     <HeaderNavLink
                         as="button"
+                        active={activePage === 'visualize'}
+                        onClick={() => activePage !== 'visualize' && navigate('/analytics')}
+                    >
+                        <IconVisualize /> Visualize
+                    </HeaderNavLink>
+
+                    <HeaderNavLink
+                        as="button"
                         active={activePage === 'leads'}
                         onClick={() => activePage !== 'leads' && navigate('/leads')}
                     >
                         <IconLeads /> Leads
                     </HeaderNavLink>
 
-                    {/* Admin & Settings are superadmin-only */}
+                    {/* Admin tab is visible to any admin level; Settings is superadmin-only */}
+                    {isAdmin && (
+                        <HeaderNavLink
+                            as="button"
+                            active={activePage === 'admin'}
+                            onClick={() => activePage !== 'admin' && navigate('/admin')}
+                        >
+                            <IconAdmin /> Admin
+                        </HeaderNavLink>
+                    )}
                     {isSuperadmin && (
-                        <>
-                            <HeaderNavLink
-                                as="button"
-                                active={activePage === 'admin'}
-                                onClick={() => activePage !== 'admin' && navigate('/admin')}
-                            >
-                                <IconAdmin /> Admin
-                            </HeaderNavLink>
-
-                            <HeaderNavLink
-                                as="button"
-                                active={activePage === 'settings'}
-                                onClick={() => activePage !== 'settings' && navigate('/settings')}
-                            >
-                                <IconSettings /> Settings
-                            </HeaderNavLink>
-                        </>
+                        <HeaderNavLink
+                            as="button"
+                            active={activePage === 'settings'}
+                            onClick={() => activePage !== 'settings' && navigate('/settings')}
+                        >
+                            <IconSettings /> Settings
+                        </HeaderNavLink>
                     )}
                 </HeaderNav>
             </HeaderStart>
 
-            {/* ── Right: notification bell + account switcher + user menu ── */}
+            {/* ── Right: calendar + notification bell + account switcher + user menu ── */}
             <HeaderEnd>
+                <ReminderCalendar />
                 <NotificationBell firedCount={firedCount} setFiredCount={setFiredCount} />
 
                 <AccountCombobox

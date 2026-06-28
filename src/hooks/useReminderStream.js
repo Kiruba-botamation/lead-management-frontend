@@ -16,6 +16,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { pushApi }      from '../api/pushApi';
 import { remindersApi } from '../api/remindersApi';
+import { playNotificationSound } from '../utils/notificationSound';
 
 /**
  * @param {function} showReminder  - from useNotifications() — shows violet reminder toast
@@ -73,6 +74,8 @@ export const useReminderStream = ({ showReminder, onNewFired, acctId, userId }) 
 
                 // Increment bell badge
                 setFiredCount(prev => prev + 1);
+                // Mild audio cue (respects the user's mute / mood preference)
+                playNotificationSound();
                 onNewFired?.();
             } catch {
                 // Malformed event — ignore

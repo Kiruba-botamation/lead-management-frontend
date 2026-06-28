@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import api from '../../api/axiosConfig';
+import api, { authApi } from '../../api/axiosConfig';
 import Tooltip from '../../components/Tooltip';
+
+/** Blank profile-edit form. */
+const EMPTY_FORM = { firstName: '', lastName: '', email: '', phone: '', profileImage: '', accessLevel: 'admin' };
 
 // Fixed column schema for the admin grid.
 //  - `filter`: 'text' shows a debounced text filter; 'select' shows the access-level dropdown; null = no filter
@@ -116,8 +119,9 @@ const AdminTab = ({ acctId }) => {
     const [currentAccessLevel, setCurrentAccessLevel] = useState(null);
     const [roles, setRoles] = useState([]);
     const [editingAdmin, setEditingAdmin] = useState(null);
-    const [editValue, setEditValue] = useState('');
+    const [editForm, setEditForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
+    const [authSyncing, setAuthSyncing] = useState(false);
 
     const isSuperadmin = currentAccessLevel === 'superadmin';
 
@@ -198,25 +202,81 @@ const AdminTab = ({ acctId }) => {
 
     const openEdit = (admin) => {
         setEditingAdmin(admin);
-        setEditValue(admin.accessLevel || 'admin');
+        setEditForm({
+            firstName: admin.firstName || '',
+            lastName: admin.lastName || '',
+            email: admin.email || '',
+            phone: admin.phone || '',
+            profileImage: admin.profileImage || '',
+            accessLevel: admin.accessLevel || 'admin',
+        });
     };
 
-    const saveAccessLevel = async () => {
+    const setField = (key, val) => setEditForm(prev => ({ ...prev, [key]: val }));
+
+    // Pull fresh name/email/phone/picture from the auth app by the admin's userId and
+    // persist them onto the admin record (req: sync admin details from the auth app).
+    const syncFromAuth = async () => {
+        if (!editingAdmin?.userId) return;
+        setAuthSyncing(true);
+        setError('');
+        try {
+            const res = await authApi.get(`/api/user/users/${editingAdmin.userId}`);
+            const u = res.data?.user || res.data || {};
+            // Full name lives in a single field on the auth profile → store it in firstName
+            setEditForm(prev => ({
+                ...prev,
+                firstName: u.name ?? prev.firstName,
+                lastName: u.name ? '' : prev.lastName,
+                email: u.email ?? prev.email,
+                phone: u.phone ?? prev.phone,
+                profileImage: u.profileImageUrl ?? prev.profileImage,
+            }));
+        } catch (err) {
+            setError(err.response?.data?.message || 'Failed to fetch user details from the auth app.');
+        } finally {
+            setAuthSyncing(false);
+        }
+    };
+
+    const saveAdmin = async () => {
         if (!editingAdmin) return;
         setSaving(true);
         setError('');
         try {
-            await api.patch('/api/ui/admins/access-level', {
+            // Profile fields (everyone may edit their own; superadmins may edit anyone)
+            await api.patch('/api/ui/admins/profile', {
                 acctId,
                 chatbotAdminId: editingAdmin.chatbotAdminId,
-                accessLevel: editValue,
+                firstName: editForm.firstName,
+                lastName: editForm.lastName,
+                email: editForm.email,
+                phone: editForm.phone,
+                profileImage: editForm.profileImage,
             });
-            setAdmins(prev => prev.map(a =>
-                a._id === editingAdmin._id ? { ...a, accessLevel: editValue } : a
-            ));
+
+            // Access level — superadmin only, and only when it actually changed
+            const levelChanged = editForm.accessLevel !== editingAdmin.accessLevel;
+            if (isSuperadmin && levelChanged) {
+                await api.patch('/api/ui/admins/access-level', {
+                    acctId,
+                    chatbotAdminId: editingAdmin.chatbotAdminId,
+                    accessLevel: editForm.accessLevel,
+                });
+            }
+
+            const patch = {
+                firstName: editForm.firstName,
+                lastName: editForm.lastName,
+                email: editForm.email,
+                phone: editForm.phone,
+                profileImage: editForm.profileImage,
+                ...(isSuperadmin && levelChanged ? { accessLevel: editForm.accessLevel } : {}),
+            };
+            setAdmins(prev => prev.map(a => (a._id === editingAdmin._id ? { ...a, ...patch } : a)));
             setEditingAdmin(null);
         } catch (err) {
-            setError(err.response?.data?.message || 'Failed to update access level.');
+            setError(err.response?.data?.message || 'Failed to update admin.');
         } finally {
             setSaving(false);
         }
@@ -269,7 +329,9 @@ const AdminTab = ({ acctId }) => {
         return v != null && v !== '' ? String(v) : '-';
     };
 
-    const colCount = COLUMNS.length + (isSuperadmin ? 1 : 0);
+    // Everyone gets an edit action (non-superadmins only ever see their own row);
+    // the access-level field inside the editor is what's gated to superadmins.
+    const colCount = COLUMNS.length + 1;
 
     return (
         <div className="h-full flex flex-col">
@@ -351,11 +413,9 @@ const AdminTab = ({ acctId }) => {
                                         )}
                                     </th>
                                 ))}
-                                {isSuperadmin && (
-                                    <th className="px-3 py-2.5 text-center align-bottom">
-                                        <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Actions</span>
-                                    </th>
-                                )}
+                                <th className="px-3 py-2.5 text-center align-bottom">
+                                    <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Actions</span>
+                                </th>
                             </tr>
                             <tr>
                                 <th colSpan="100" className="p-0 h-[3px] bg-gradient-to-r from-indigo-500 via-violet-400 to-indigo-500 border-none shadow-[0_0_15px_rgba(99,102,241,0.6)] relative z-20"></th>
@@ -393,20 +453,18 @@ const AdminTab = ({ acctId }) => {
                                                 {renderCell(admin, col)}
                                             </td>
                                         ))}
-                                        {isSuperadmin && (
-                                            <td className="px-3 py-2 whitespace-nowrap text-center">
-                                                <Tooltip content="Edit access level" placement="top">
-                                                    <button
-                                                        onClick={() => openEdit(admin)}
-                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all"
-                                                    >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                        </svg>
-                                                    </button>
-                                                </Tooltip>
-                                            </td>
-                                        )}
+                                        <td className="px-3 py-2 whitespace-nowrap text-center">
+                                            <Tooltip content="Edit admin" placement="top">
+                                                <button
+                                                    onClick={() => openEdit(admin)}
+                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                    </svg>
+                                                </button>
+                                            </Tooltip>
+                                        </td>
                                     </tr>
                                 ))
                             )}
@@ -459,15 +517,79 @@ const AdminTab = ({ acctId }) => {
                 </div>
             </div>
 
-            {/* Edit access level modal */}
+            {/* Edit admin modal */}
             {editingAdmin && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => !saving && setEditingAdmin(null)}>
-                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-80 p-5" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-sm font-bold text-gray-800 mb-1">Edit Access Level</h3>
-                        <p className="text-xs text-gray-500 mb-4">{fullName(editingAdmin)}</p>
-                        <div className="mb-4">
-                            <AccessLevelSelect roles={roles} value={editValue} onChange={setEditValue} disabled={saving} />
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => !saving && !authSyncing && setEditingAdmin(null)}>
+                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-96 max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-start justify-between mb-4">
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-800">Edit Admin</h3>
+                                <p className="text-xs text-gray-500">{fullName(editingAdmin)}</p>
+                            </div>
+                            <Tooltip content={editingAdmin.userId ? 'Pull name, email, phone & picture from the auth app' : 'No linked user to sync'} placement="left">
+                                <button
+                                    type="button"
+                                    onClick={syncFromAuth}
+                                    disabled={saving || authSyncing || !editingAdmin.userId}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    <svg className={`w-3.5 h-3.5 ${authSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    {authSyncing ? 'Syncing…' : 'Sync from auth'}
+                                </button>
+                            </Tooltip>
                         </div>
+
+                        {/* Avatar preview */}
+                        <div className="flex items-center gap-3 mb-4">
+                            {editForm.profileImage ? (
+                                <img src={editForm.profileImage} alt="" className="w-12 h-12 rounded-full object-cover border border-gray-200" onError={(e) => { e.target.style.display = 'none'; }} />
+                            ) : (
+                                <span className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: getAvatarColor(editForm.firstName || 'A') }}>
+                                    {(editForm.firstName || '?').charAt(0).toUpperCase()}
+                                </span>
+                            )}
+                            <div className="flex-1">
+                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Profile Picture URL</label>
+                                <input className="ds-input w-full text-xs" value={editForm.profileImage} onChange={(e) => setField('profileImage', e.target.value)} placeholder="https://…" disabled={saving} />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div>
+                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">First Name</label>
+                                <input className="ds-input w-full text-xs" value={editForm.firstName} onChange={(e) => setField('firstName', e.target.value)} disabled={saving} />
+                            </div>
+                            <div>
+                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Last Name</label>
+                                <input className="ds-input w-full text-xs" value={editForm.lastName} onChange={(e) => setField('lastName', e.target.value)} disabled={saving} />
+                            </div>
+                        </div>
+                        <div className="mb-3">
+                            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Email</label>
+                            <input className="ds-input w-full text-xs" type="email" value={editForm.email} onChange={(e) => setField('email', e.target.value)} disabled={saving} />
+                        </div>
+                        <div className="mb-3">
+                            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Phone</label>
+                            <input className="ds-input w-full text-xs" value={editForm.phone} onChange={(e) => setField('phone', e.target.value)} disabled={saving} />
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Access Level</label>
+                            {isSuperadmin ? (
+                                <AccessLevelSelect roles={roles} value={editForm.accessLevel} onChange={(v) => setField('accessLevel', v)} disabled={saving} />
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${(ROLE_COLORS[editForm.accessLevel] || ROLE_COLORS.admin).bg} ${(ROLE_COLORS[editForm.accessLevel] || ROLE_COLORS.admin).text}`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${(ROLE_COLORS[editForm.accessLevel] || ROLE_COLORS.admin).dot}`} />
+                                        {(roles.find(r => r.key === editForm.accessLevel)?.label) || editForm.accessLevel}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">Only a super admin can change rights</span>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="flex justify-end gap-2">
                             <button
                                 onClick={() => setEditingAdmin(null)}
@@ -477,7 +599,7 @@ const AdminTab = ({ acctId }) => {
                                 Cancel
                             </button>
                             <button
-                                onClick={saveAccessLevel}
+                                onClick={saveAdmin}
                                 disabled={saving}
                                 className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-all disabled:opacity-50"
                             >

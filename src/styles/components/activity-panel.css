@@ -146,6 +146,11 @@
 .activity-panel__body::-webkit-scrollbar-track { background: transparent; }
 .activity-panel__body::-webkit-scrollbar-thumb { background: var(--color-gray-200); border-radius: var(--radius-full); }
 
+/* Keep every item at its natural height — without this, the flex column squishes
+   the add-note form / "New Reminder" button (and cards) once the list overflows
+   and the scrollbar appears. The body itself scrolls instead. */
+.activity-panel__body > * { flex-shrink: 0; }
+
 /* ── Note card ───────────────────────────────────────────────── */
 .note-card {
     background: linear-gradient(135deg, rgba(238, 242, 255, 0.55) 0%, var(--color-surface) 65%);

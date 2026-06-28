@@ -69,7 +69,7 @@ const CardAvatar = ({ lead, size = 'w-6 h-6' }) => {
 const KanbanCard = ({
     lead, stageColor, admins, stages, activeLeadId, activityTab,
     noteCount, reminderCount, dragging,
-    onEdit, onActivity, onDelete, onReassign, onMoveStage,
+    onEdit, onActivity, onDelete, isSuperAdmin, onReassign, onMoveStage,
 }) => {
     const [assignOpen, setAssignOpen] = useState(false);
     const [moveOpen, setMoveOpen]     = useState(false);
@@ -107,8 +107,13 @@ const KanbanCard = ({
     return (
         <div
             ref={setNodeRef}
-            style={{ borderLeftColor: stageColor }}
-            className={`group/card bg-white rounded-lg border border-gray-200 border-l-[3px] shadow-sm hover:shadow-md transition-shadow ${beingDragged ? 'opacity-0' : ''} ${isActive ? 'ring-2 ring-indigo-400' : ''}`}
+            style={{
+                borderLeftColor: stageColor,
+                // Active card (being edited / notes / reminders open) is ringed in the
+                // stage's own colour rather than a fixed violet.
+                ...(isActive ? { boxShadow: `0 0 0 2px ${stageColor}, 0 1px 3px rgba(0,0,0,0.12)` } : {}),
+            }}
+            className={`group/card bg-white rounded-lg border border-gray-200 border-l-[3px] shadow-sm hover:shadow-md transition-shadow ${beingDragged ? 'opacity-0' : ''}`}
         >
             {/* Header — the whole bar is the drag handle; only the name text is highlighted */}
             <div
@@ -196,11 +201,13 @@ const KanbanCard = ({
                             <IconMove />
                         </button>
                     </Tooltip>
-                    <Tooltip content="Delete lead" placement="top">
-                        <button onClick={() => onDelete(lead._id)} className="group relative w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 border border-gray-200 hover:border-red-300 transition-colors">
-                            <IconTrash />
-                        </button>
-                    </Tooltip>
+                    {isSuperAdmin && (
+                        <Tooltip content="Delete lead" placement="top">
+                            <button onClick={() => onDelete(lead._id)} className="group relative w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 border border-gray-200 hover:border-red-300 transition-colors">
+                                <IconTrash />
+                            </button>
+                        </Tooltip>
+                    )}
                     {moveOpen && (
                         <div className="absolute right-0 bottom-7 z-40 w-44 max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl py-1">
                             {stages.map(s => (
@@ -266,7 +273,7 @@ const CardGhost = ({ lead, stageColor }) => {
 // ── Column ──────────────────────────────────────────────────────────────────
 const KanbanColumn = ({
     stage, col, index, stageCount, busy,
-    admins, stages, activeLeadId, activityTab, draggingId, noteCounts, reminderCounts,
+    admins, isSuperAdmin, stages, activeLeadId, activityTab, draggingId, noteCounts, reminderCounts,
     onLoadMore, onEdit, onActivity, onDelete, onReassign, onMoveStage,
     onRename, onRecolor, onReorder, onDeleteStage,
 }) => {
@@ -300,7 +307,10 @@ const KanbanColumn = ({
     }, [menuOpen]);
 
     return (
-        <div className="kanban-col w-72 shrink-0 flex flex-col min-h-0 rounded-xl border border-gray-200 bg-gray-50/60">
+        <div
+            className={`kanban-col w-72 shrink-0 flex flex-col min-h-0 rounded-xl border bg-gray-50/60 transition-all duration-150 ${isOver ? 'border-transparent' : 'border-gray-200'}`}
+            style={isOver ? { boxShadow: `0 0 0 2px ${stage.color}`, backgroundColor: tint(stage.color, 0.1) } : undefined}
+        >
             {/* Header */}
             <div className="shrink-0 rounded-t-xl px-2.5 py-2 border-b" style={{ backgroundColor: tint(stage.color, 0.14), borderColor: tint(stage.color, 0.35) }}>
                 <div className="flex items-center gap-1.5">
@@ -359,7 +369,7 @@ const KanbanColumn = ({
             {/* Cards */}
             <div
                 ref={(node) => { setNodeRef(node); scrollRef.current = node; }}
-                className={`flex-1 overflow-y-auto min-h-0 p-2 flex flex-col gap-2 transition-colors ${isOver ? 'bg-indigo-50/60' : ''}`}
+                className="flex-1 overflow-y-auto min-h-0 p-2 flex flex-col gap-2"
             >
                 {leads.map((lead) => (
                     <KanbanCard
@@ -376,6 +386,7 @@ const KanbanColumn = ({
                         onEdit={onEdit}
                         onActivity={onActivity}
                         onDelete={onDelete}
+                        isSuperAdmin={isSuperAdmin}
                         onReassign={onReassign}
                         onMoveStage={onMoveStage}
                     />
@@ -665,6 +676,7 @@ const LeadsKanban = ({
                                 col={columns[stage.id]}
                                 busy={stageBusy}
                                 admins={admins}
+                                isSuperAdmin={isSuperAdmin}
                                 stages={stages}
                                 activeLeadId={activeLeadId}
                                 activityTab={activityTab}

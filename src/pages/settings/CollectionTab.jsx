@@ -91,6 +91,19 @@ const SYSTEM_FIELDS = [
 // Set of field keys that are always system fields
 const SYSTEM_FIELD_KEYS = new Set(SYSTEM_FIELDS.map(f => f.field));
 
+// System predefined fields shown in the API documentation. These are ALWAYS
+// accepted by the lead-intake API regardless of the collection's custom fields.
+// `stage` is included here (it's accepted by the API) even though it isn't part
+// of SYSTEM_FIELDS' legacy field-position logic.
+const API_PREDEFINED_FIELDS = [
+    { label: 'Name',        field: 'name',        type: 'text',   required: true,  sample: 'Joe Smith' },
+    { label: 'Phone',       field: 'phone',       type: 'text',   required: true,  sample: '+1234567890' },
+    { label: 'Email',       field: 'email',       type: 'text',   required: false, sample: 'joe@example.com' },
+    { label: 'Responsible', field: 'responsible', type: 'text',   required: false, sample: '{{assigned_admin_id}}' },
+    { label: 'Stage',       field: 'stage',       type: 'number', required: false, sample: 1 },
+];
+const API_PREDEFINED_KEYS = new Set(API_PREDEFINED_FIELDS.map(f => f.field));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Normalise a collection name: lowercase, spaces → underscore, strip special chars */
@@ -150,13 +163,6 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
     const endpoint    = `POST ${origin}/api/leads/${collection.collectionName}`;
     const headersText = `x-api-key: ${apiKey}\nx-page-id: ${acctNo || '<your-account-number>'}\nContent-Type: application/json`;
 
-    // Build example payload from field definitions
-    const payloadFields = {
-        name:        '{{full_name}}',
-        phone:       '{{phone}}',
-        email:       '{{email}}',
-        responsible: '{{assigned_admin_id}}',
-    };
     const dummyValue = (f) => {
         const key = (f.label || f.field || '').toLowerCase().replace(/\s+/g, '_');
         switch ((f.type || 'Text').toLowerCase()) {
@@ -183,9 +189,19 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
             }
         }
     };
-    (collection.fields || [])
-        .filter(f => !SYSTEM_FIELD_KEYS.has(f.field))
-        .forEach(f => { payloadFields[f.field] = dummyValue(f); });
+    // Custom (collection-specific) fields, excluding any predefined ones
+    const customFields = (collection.fields || []).filter(f => !API_PREDEFINED_KEYS.has(f.field));
+
+    // Full field reference: predefined first (always present), then custom fields.
+    const allFields = [
+        ...API_PREDEFINED_FIELDS.map(f => ({ ...f, predefined: true })),
+        ...customFields.map(f => ({ ...f, predefined: false, required: !!f.required })),
+    ];
+
+    // Build the example payload in the same order — predefined fields always shown.
+    const payloadFields = {};
+    API_PREDEFINED_FIELDS.forEach(f => { payloadFields[f.field] = f.sample; });
+    customFields.forEach(f => { payloadFields[f.field] = dummyValue(f); });
 
     const payloadText = JSON.stringify({ data: payloadFields }, null, 2);
 
@@ -194,6 +210,23 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
   -H "x-page-id: ${acctNo || '<your-account-number>'}" \\
   -H "Content-Type: application/json" \\
   -d '${JSON.stringify({ data: payloadFields })}'`;
+
+    // ── Bulk insert (batch) ────────────────────────────────────────────────────
+    // `data` also accepts an array of lead objects in a single request. A second
+    // sample lead is derived from the first by varying the identifying fields.
+    const secondLead = { ...payloadFields };
+    if ('name' in secondLead)  secondLead.name  = 'Jane Doe';
+    if ('email' in secondLead) secondLead.email = 'jane@example.com';
+    if ('phone' in secondLead) secondLead.phone = '+1987654321';
+    const bulkLeads = [payloadFields, secondLead];
+
+    const bulkPayloadText = JSON.stringify({ data: bulkLeads }, null, 2);
+    const bulkMergeText   = JSON.stringify({ config: { merge: { properties: ['email'] } }, data: bulkLeads }, null, 2);
+    const bulkCurlText = `curl -X POST "${origin}/api/leads/${collection.collectionName}" \\
+  -H "x-api-key: ${apiKey}" \\
+  -H "x-page-id: ${acctNo || '<your-account-number>'}" \\
+  -H "Content-Type: application/json" \\
+  -d '${JSON.stringify({ data: bulkLeads })}'`;
 
     return (
         <div className="fixed inset-0 flex items-start justify-center p-4 pt-6" style={{ zIndex: 300 }}>
@@ -236,6 +269,42 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
                                 </p>
                             </Section>
 
+                            {/* Fields reference */}
+                            <Section title="Fields">
+                                <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+                                    <table className="w-full text-[11px]">
+                                        <thead>
+                                            <tr className="bg-gray-100 text-gray-600">
+                                                <th className="text-left font-semibold px-3 py-1.5">Field</th>
+                                                <th className="text-left font-semibold px-3 py-1.5">Type</th>
+                                                <th className="text-left font-semibold px-3 py-1.5">Requirement</th>
+                                                <th className="text-left font-semibold px-3 py-1.5">Category</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {allFields.map(f => (
+                                                <tr key={f.field}>
+                                                    <td className="px-3 py-1.5 font-mono text-gray-800">{f.field}</td>
+                                                    <td className="px-3 py-1.5 text-gray-600">{(f.type || 'text')}</td>
+                                                    <td className="px-3 py-1.5">
+                                                        {f.required ? (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-700">Mandatory</span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-500">Optional</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-1.5 text-gray-500">{f.predefined ? 'Predefined' : 'Custom'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p className="mt-1 text-[10px] text-gray-500">
+                                    <strong>name</strong> and <strong>phone</strong> are mandatory; all other fields are optional.
+                                    <span className="block">Predefined fields (<code className="bg-gray-100 px-1 rounded font-mono">name, phone, email, responsible, stage</code>) are always accepted.</span>
+                                </p>
+                            </Section>
+
                             {/* Payload */}
                             <Section title="Payload" copyText={payloadText}>
                                 <pre className="bg-gray-100 rounded-lg px-3 py-2 font-mono text-[11px] text-gray-800 overflow-x-auto whitespace-pre">
@@ -247,6 +316,34 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
                             <Section title="cURL Example" copyText={curlText}>
                                 <pre className="bg-gray-900 text-green-400 rounded-lg px-3 py-2 font-mono text-[10px] overflow-x-auto whitespace-pre">
                                     {curlText}
+                                </pre>
+                            </Section>
+
+                            {/* Bulk insert (batch) */}
+                            <Section title="Bulk Insert (Batch)" copyText={bulkPayloadText}>
+                                <p className="mb-1 text-[10px] text-gray-500">
+                                    Send multiple leads in one request by passing an array to <code className="bg-gray-100 px-1 rounded font-mono">data</code>.
+                                </p>
+                                <pre className="bg-gray-100 rounded-lg px-3 py-2 font-mono text-[11px] text-gray-800 overflow-x-auto whitespace-pre">
+                                    {bulkPayloadText}
+                                </pre>
+                            </Section>
+
+                            {/* Bulk insert with merge / upsert */}
+                            <Section title="Bulk Insert with Merge (Upsert)" copyText={bulkMergeText}>
+                                <pre className="bg-gray-100 rounded-lg px-3 py-2 font-mono text-[11px] text-gray-800 overflow-x-auto whitespace-pre">
+                                    {bulkMergeText}
+                                </pre>
+                                <p className="mt-1 text-[10px] text-gray-500">
+                                    With <code className="bg-gray-100 px-1 rounded font-mono">config.merge.properties</code>, existing leads matching those fields
+                                    (e.g. <code className="bg-gray-100 px-1 rounded font-mono">email</code>) are updated instead of duplicated. Omit it to always create new leads.
+                                </p>
+                            </Section>
+
+                            {/* Bulk cURL example */}
+                            <Section title="Bulk cURL Example" copyText={bulkCurlText}>
+                                <pre className="bg-gray-900 text-green-400 rounded-lg px-3 py-2 font-mono text-[10px] overflow-x-auto whitespace-pre">
+                                    {bulkCurlText}
                                 </pre>
                             </Section>
 
@@ -265,7 +362,7 @@ const Section = ({ title, copyText, children }) => (
     <div>
         <div className="flex items-center justify-between mb-1">
             <p className="font-semibold text-gray-900">{title}</p>
-            <CopyButton text={copyText} />
+            {copyText != null && <CopyButton text={copyText} />}
         </div>
         {children}
     </div>

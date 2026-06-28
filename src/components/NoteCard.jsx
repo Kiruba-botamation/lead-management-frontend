@@ -35,15 +35,17 @@ function getInitials(name) {
 /**
  * @param {object}   note             - Note document (with adminName + adminProfileImage injected by backend)
  * @param {string}   currentAdminId   - The logged-in admin's userId (for ownership check)
+ * @param {boolean}  isSuperAdmin     - Superadmins may edit/delete any note
  * @param {function} onEdit(id, desc) - Called after a successful inline edit
  * @param {function} onDelete(id)     - Called when delete is confirmed
  */
-export default function NoteCard({ note, currentAdminId, onEdit, onDelete }) {
+export default function NoteCard({ note, currentAdminId, isSuperAdmin = false, onEdit, onDelete }) {
     const [editing,   setEditing]   = useState(false);
     const [editValue, setEditValue] = useState(note.description);
     const [saving,    setSaving]    = useState(false);
 
-    const isOwner  = note.userId === currentAdminId;
+    // Creator may always manage their note; superadmins may manage any note
+    const canManage = note.userId === currentAdminId || isSuperAdmin;
     const initials = getInitials(note.adminName);
 
     const handleSaveEdit = async () => {
@@ -113,8 +115,8 @@ export default function NoteCard({ note, currentAdminId, onEdit, onDelete }) {
                 <p className="note-card__description">{note.description}</p>
             )}
 
-            {/* Owner actions */}
-            {isOwner && !editing && (
+            {/* Owner / superadmin actions */}
+            {canManage && !editing && (
                 <div className="note-card__actions">
                     <button
                         className="note-card__action-btn note-card__action-btn--edit"

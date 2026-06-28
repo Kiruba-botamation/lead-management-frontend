@@ -4,7 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { AUTH_SERVICE_URL } from './api/axiosConfig';
 
-const ProtectedRoute = ({ children, roles, requireSuperadmin }) => {
+const ProtectedRoute = ({ children, roles, requireSuperadmin, requireAdmin }) => {
     const { user, authenticated, loading, accessLevel, adminResolved } = useAuth();
 
     // Redirect to SSO login when auth check is complete and user is not authenticated.
@@ -54,9 +54,11 @@ const ProtectedRoute = ({ children, roles, requireSuperadmin }) => {
         }
     }
 
-    // Superadmin-only pages (Admin, Settings) — wait for the per-account admin
-    // lookup, then enforce. Non-superadmins are sent back to the leads page.
-    if (requireSuperadmin) {
+    // Admin-gated pages — wait for the per-account admin lookup, then enforce.
+    // requireSuperadmin: Settings (collections/API/webhooks) — superadmin only.
+    // requireAdmin: Admin tab — any admin level (admin or superadmin); the tab itself
+    //   restricts a plain admin to their own record and hides rights editing.
+    if (requireSuperadmin || requireAdmin) {
         if (!adminResolved) {
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
@@ -65,7 +67,10 @@ const ProtectedRoute = ({ children, roles, requireSuperadmin }) => {
                 </div>
             );
         }
-        if (accessLevel !== 'superadmin') {
+        const allowed = requireSuperadmin
+            ? accessLevel === 'superadmin'
+            : (accessLevel === 'superadmin' || accessLevel === 'admin');
+        if (!allowed) {
             return <Navigate to="/leads" replace />;
         }
     }
@@ -77,6 +82,7 @@ ProtectedRoute.propTypes = {
     children: PropTypes.node.isRequired,
     roles: PropTypes.arrayOf(PropTypes.string),
     requireSuperadmin: PropTypes.bool,
+    requireAdmin: PropTypes.bool,
 };
 
 export default ProtectedRoute;

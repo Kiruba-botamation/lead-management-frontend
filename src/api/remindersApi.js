@@ -18,6 +18,9 @@ export const remindersApi = {
     /** Get fired reminders for the bell inbox (paginated) */
     getFired:     (page = 1, limit = 10, adminId) => api.get('/api/ui/reminders/fired', { params: { page, limit, adminId } }),
 
+    /** Calendar view — all reminders for the current user within [start, end) (ISO strings) */
+    calendar:     (acctId, start, end)             => api.get('/api/ui/reminders/calendar', { params: { acctId, start, end } }),
+
     /** Mark fired reminders as read (pass ids array or omit to mark all) */
     markRead:     (reminderIds, adminId)           => api.post('/api/ui/reminders/mark-read', { reminderIds, adminId }),
 

@@ -62,11 +62,11 @@ function AppRoutes() {
                     }
                 />
 
-                {/* Admin route — superadmin only */}
+                {/* Admin route — any admin level (admin or superadmin) */}
                 <Route
                     path="/admin"
                     element={
-                        <ProtectedRoute requireSuperadmin>
+                        <ProtectedRoute requireAdmin>
                             <AdminPage />
                         </ProtectedRoute>
                     }

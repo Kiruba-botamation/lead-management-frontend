@@ -9,6 +9,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate }  from 'react-router-dom';
 import { remindersApi } from '../api/remindersApi';
+import {
+    SOUND_MOODS,
+    getSoundSettings,
+    saveSoundSettings,
+    playNotificationSound,
+    unlockNotificationSound,
+} from '../utils/notificationSound';
 
 const PAGE_SIZE = 10;
 
@@ -31,8 +38,21 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const [loadingMore,setLoadingMore]= useState(false);
     const [page,       setPage]       = useState(1);
     const [hasMore,    setHasMore]    = useState(false);
+    const [soundSettings, setSoundSettings] = useState(getSoundSettings);
+    const [soundPanelOpen, setSoundPanelOpen] = useState(false);
     const dropdownRef  = useRef(null);
     const listRef      = useRef(null);
+
+    // Update sound preferences (mute / mood) and persist them. A short preview
+    // plays on change (also a user gesture, which unlocks audio for later cues).
+    const updateSound = (patch, { preview = false } = {}) => {
+        const next = saveSoundSettings(patch);
+        setSoundSettings(next);
+        if (preview && next.enabled) {
+            unlockNotificationSound();
+            playNotificationSound(next);
+        }
+    };
 
     const unreadCount = reminders.filter(r => !r.notificationRead).length;
 
@@ -128,7 +148,10 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
                     transition: 'background var(--transition-fast)', flexShrink: 0,
                 }}
             >
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                    width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    className={firedCount > 0 ? 'animate-bell-swing' : undefined}
+                >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                 </svg>
@@ -168,16 +191,112 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
                         <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-semibold)', color: 'var(--color-text)' }}>
                             Reminders
                         </span>
-                        {unreadCount > 0 && (
-                            <span style={{
-                                fontSize: '9px', fontWeight: 700,
-                                color: '#6d28d9', background: '#ede9fe',
-                                borderRadius: '9999px', padding: '1px 7px',
-                            }}>
-                                {unreadCount} unread
-                            </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {unreadCount > 0 && (
+                                <span style={{
+                                    fontSize: '9px', fontWeight: 700,
+                                    color: '#6d28d9', background: '#ede9fe',
+                                    borderRadius: '9999px', padding: '1px 7px',
+                                }}>
+                                    {unreadCount} unread
+                                </span>
+                            )}
+                            {/* Sound settings toggle */}
+                            <button
+                                onClick={() => setSoundPanelOpen(o => !o)}
+                                title="Notification sound"
+                                style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    width: '22px', height: '22px', borderRadius: '6px',
+                                    border: '1px solid var(--color-border)',
+                                    background: soundPanelOpen ? 'var(--color-bg-subtle)' : 'transparent',
+                                    color: soundSettings.enabled ? '#6d28d9' : 'var(--color-text-muted)',
+                                    cursor: 'pointer', padding: 0,
+                                }}
+                            >
+                                {soundSettings.enabled ? (
+                                    <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M17.95 6.05a8 8 0 010 11.9M11 5L6 9H2v6h4l5 4V5z" />
+                                    </svg>
+                                ) : (
+                                    <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6" />
+                                    </svg>
+                                )}
+                            </button>
+                        </div>
                     </div>
+
+                    {/* Sound settings panel */}
+                    {soundPanelOpen && (
+                        <div style={{
+                            padding: 'var(--space-2-5) var(--space-3)',
+                            borderBottom: '1px solid var(--color-border)',
+                            background: 'var(--color-bg-subtle)', flexShrink: 0,
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                <span style={{ fontSize: 'var(--text-2xs)', fontWeight: 600, color: 'var(--color-text)' }}>
+                                    Notification sound
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{
+                                        fontSize: '10px', fontWeight: 700,
+                                        color: soundSettings.enabled ? '#15803d' : '#b91c1c',
+                                    }}>
+                                        {soundSettings.enabled ? 'On' : 'Off'}
+                                    </span>
+                                    {/* Toggle switch — makes "you can turn this off" visually obvious */}
+                                    <button
+                                        role="switch"
+                                        aria-checked={soundSettings.enabled}
+                                        aria-label="Toggle notification sound"
+                                        title={soundSettings.enabled ? 'Sound on — click to mute' : 'Sound off — click to enable'}
+                                        onClick={() => updateSound({ enabled: !soundSettings.enabled }, { preview: !soundSettings.enabled })}
+                                        style={{
+                                            position: 'relative', width: '38px', height: '20px',
+                                            borderRadius: '9999px', cursor: 'pointer', padding: 0,
+                                            border: 'none', flexShrink: 0,
+                                            background: soundSettings.enabled ? '#7c3aed' : '#cbd5e1',
+                                            transition: 'background var(--transition-fast)',
+                                        }}
+                                    >
+                                        <span style={{
+                                            position: 'absolute', top: '2px',
+                                            left: soundSettings.enabled ? '20px' : '2px',
+                                            width: '16px', height: '16px', borderRadius: '50%',
+                                            background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                                            transition: 'left var(--transition-fast)',
+                                        }} />
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', opacity: soundSettings.enabled ? 1 : 0.45, pointerEvents: soundSettings.enabled ? 'auto' : 'none' }}>
+                                {SOUND_MOODS.map(m => {
+                                    const active = soundSettings.mood === m.id;
+                                    return (
+                                        <button
+                                            key={m.id}
+                                            onClick={() => updateSound({ mood: m.id }, { preview: true })}
+                                            title={`Preview ${m.label}`}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: '4px',
+                                                fontSize: '10px', fontWeight: 600, padding: '3px 8px',
+                                                borderRadius: '8px', cursor: 'pointer',
+                                                border: `1px solid ${active ? '#7c3aed' : 'var(--color-border)'}`,
+                                                background: active ? '#ede9fe' : 'var(--color-surface)',
+                                                color: active ? '#6d28d9' : 'var(--color-text)',
+                                            }}
+                                        >
+                                            <span>{m.emoji}</span>{m.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p style={{ margin: '7px 0 0', fontSize: '9px', color: 'var(--color-text-muted)' }}>
+                                Pick a tone to preview it. Turn sound off to silence alerts — the unread count and bell still show.
+                            </p>
+                        </div>
+                    )}
 
                     {/* Scrollable list */}
                     <div
@@ -243,6 +362,19 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
                                                 <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-muted)' }}>
                                                     {formatScheduledAt(rem.scheduledAt)}
                                                 </span>
+                                                {rem.collectionName && (
+                                                    <span
+                                                        style={{
+                                                            fontSize: '9px', fontWeight: 700, color: '#0369a1',
+                                                            background: '#e0f2fe', border: '1px solid #bae6fd',
+                                                            borderRadius: '9999px', padding: '1px 6px', flexShrink: 0,
+                                                            maxWidth: '45%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                                        }}
+                                                        title={`Collection: ${rem.collectionName}`}
+                                                    >
+                                                        {rem.collectionName}
+                                                    </span>
+                                                )}
                                                 {isUnread && (
                                                     <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7c3aed', flexShrink: 0, marginLeft: 'auto' }} />
                                                 )}
