@@ -27,8 +27,7 @@ import AppNavbar from './AppNavbar';
 import LeadActivityPanel from './LeadActivityPanel';
 import Button from './ui/Button';
 import { Dropdown, DropdownItem } from './ui/Dropdown';
-import { notesApi }     from '../api/notesApi';
-import { remindersApi } from '../api/remindersApi';
+import { activityApi } from '../api/notesApi';
 import { twoLetterColor, adminDisplayName, tint, ResponsibleSelect, StageSelect } from './leads/leadShared';
 import LeadsKanban from './leads/LeadsKanban';
 import {
@@ -1089,6 +1088,11 @@ const LeadsGrid = () => {
     const [activeColId, setActiveColId] = useState(null);
     const [colWidths, setColWidths]         = useState({});
 
+    // Ref that's set synchronously inside fetchColumnDefs before any await so
+    // fetchLeads can check it in the same effects phase and bail without fetching
+    // stale data (prevents the duplicate-fetch race on collection switch).
+    const columnDefsLoadingRef = useRef(false);
+
     // ── Grid viewport width (for even-spreading columns) ──────────────────────
     const gridScrollRef = useRef(null);
     const [gridViewportW, setGridViewportW] = useState(0);
@@ -1221,6 +1225,9 @@ const LeadsGrid = () => {
     // ── CALL 2: Fetch column definitions for selected collection ────────────────
     const fetchColumnDefs = useCallback(async (collectionId) => {
         if (!collectionId || !acctId) return;
+        // Mark loading synchronously (before any await) so fetchLeads can check
+        // the ref in the same effects phase and avoid a stale duplicate fetch.
+        columnDefsLoadingRef.current = true;
         setColumnDefsReady(false);
         try {
             const res  = await api.get(`/api/ui/leads/collections/${collectionId}/fields`, { params: { acctId } });
@@ -1261,6 +1268,8 @@ const LeadsGrid = () => {
             setColumnDefsReady(true);
         } catch {
             setColumnDefsReady(true);
+        } finally {
+            columnDefsLoadingRef.current = false;
         }
     }, [acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1274,7 +1283,13 @@ const LeadsGrid = () => {
 
     // ── CALL 3: Fetch lead data ───────────────────────────────────────────────
     const fetchLeads = useCallback(async () => {
-        if (!isAccountLinked || !acctId || !collectionsReady || !columnDefsReady) {
+        // Only fetch for the grid view; kanban manages its own per-stage fetches.
+        if (viewMode !== 'grid') { setLoading(false); return; }
+
+        // columnDefsLoadingRef is set synchronously in fetchColumnDefs before any
+        // await, preventing a duplicate fetch that would otherwise start before
+        // columnDefsReady state has been cleared in the same effects phase.
+        if (!isAccountLinked || !acctId || !collectionsReady || !columnDefsReady || columnDefsLoadingRef.current) {
             if (accountsLoaded && !accountsLoading && !isAccountLinked) setLoading(false);
             // Account is linked and the collection list has loaded, but there is no
             // collection to load leads for (e.g. a freshly linked account with none
@@ -1317,16 +1332,14 @@ const LeadsGrid = () => {
             const newLeads = res.data.data || [];
             setLeads(newLeads);
             setTotalRecords(res.data.pagination?.total || 0);
-            // Fetch per-lead activity counts (non-blocking — silent on error)
+            // Fetch per-lead activity counts (non-blocking — 1 combined call, silent on error)
             if (newLeads.length && acctId) {
                 const leadIds = newLeads.map(l => l._id);
-                Promise.allSettled([
-                    notesApi.batchCounts(leadIds, acctId),
-                    remindersApi.batchCounts(leadIds, acctId),
-                ]).then(([noteRes, reminderRes]) => {
-                    if (noteRes.status === 'fulfilled')     setNoteCounts(noteRes.value.data?.data || {});
-                    if (reminderRes.status === 'fulfilled') setReminderCounts(reminderRes.value.data?.data || {});
-                });
+                activityApi.batchCounts(leadIds, acctId).then(r => {
+                    const d = r.data?.data || {};
+                    setNoteCounts(d.notes || {});
+                    setReminderCounts(d.reminders || {});
+                }).catch(() => {});
             } else {
                 setNoteCounts({});
                 setReminderCounts({});
@@ -1338,7 +1351,7 @@ const LeadsGrid = () => {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [viewMode, currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -2187,6 +2200,11 @@ const LeadsGrid = () => {
                                                                                 <svg className={`w-3.5 h-3.5 transition-colors ${activityLead?._id === lead._id && activityTab === 'notes' ? 'text-indigo-600' : noteCounts[lead._id] > 0 ? 'text-indigo-400' : 'text-gray-400 group-hover:text-indigo-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                                                                 </svg>
+                                                                                {noteCounts[lead._id] > 0 && (
+                                                                                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-indigo-600 rounded-full text-white text-[8px] flex items-center justify-center font-bold pointer-events-none">
+                                                                                        {noteCounts[lead._id] > 9 ? '9+' : noteCounts[lead._id]}
+                                                                                    </span>
+                                                                                )}
                                                                             </button>
                                                                         </Tooltip>
                                                                         <Tooltip content="Reminders" placement="top">
@@ -2197,6 +2215,11 @@ const LeadsGrid = () => {
                                                                                 <svg className={`w-3.5 h-3.5 transition-colors ${activityLead?._id === lead._id && activityTab === 'reminders' ? 'text-amber-600' : reminderCounts[lead._id] > 0 ? 'text-amber-400' : 'text-gray-400 group-hover:text-amber-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                                                                                 </svg>
+                                                                                {reminderCounts[lead._id] > 0 && (
+                                                                                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-500 rounded-full text-white text-[8px] flex items-center justify-center font-bold pointer-events-none">
+                                                                                        {reminderCounts[lead._id] > 9 ? '9+' : reminderCounts[lead._id]}
+                                                                                    </span>
+                                                                                )}
                                                                             </button>
                                                                         </Tooltip>
                                                                         {/* Deleting a lead is restricted to super admins */}
@@ -2273,6 +2296,7 @@ const LeadsGrid = () => {
                                             setNoteCounts={setNoteCounts}
                                             setReminderCounts={setReminderCounts}
                                             refreshKey={leadsVersion}
+                                            isActive={viewMode === 'kanban'}
                                             showSuccess={showSuccess}
                                             showError={showError}
                                         />

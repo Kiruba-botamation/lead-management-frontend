@@ -39,11 +39,11 @@ function saveChatbotAdminToStorage(obj) {
 export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId) {
     if (!acctId || !userId) return null;
     try {
-        const res = await api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } });
+        const res = await api.get('/api/ui/admins/list', { params: { acctId, userId, limit: 1 } });
         const raw = res.data;
         const adminList = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
 
-        const matchedAdmin = adminList.find(a => String(a.userId || '') === String(userId));
+        const matchedAdmin = adminList[0];
 
         if (!matchedAdmin?._id) return null;
 

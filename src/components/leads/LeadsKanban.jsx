@@ -24,8 +24,7 @@ import {
     closestCorners,
 } from '@dnd-kit/core';
 import api from '../../api/axiosConfig';
-import { notesApi } from '../../api/notesApi';
-import { remindersApi } from '../../api/remindersApi';
+import { activityApi } from '../../api/notesApi';
 import Tooltip from '../Tooltip';
 import { tint, twoLetterColor, adminDisplayName } from './leadShared';
 
@@ -455,7 +454,7 @@ const LeadsKanban = ({
     appliedFilters, responsibleFilter, sortField, sortOrder,
     onEdit, onActivity, onDelete, activeLeadId, activityTab,
     noteCounts, reminderCounts, setNoteCounts, setReminderCounts,
-    refreshKey, showSuccess, showError,
+    refreshKey, isActive, showSuccess, showError,
 }) => {
     const [columns, setColumns] = useState({}); // { [stageId]: {leads,page,total,loading,done} }
     const [draggingId, setDraggingId] = useState(null);
@@ -494,15 +493,14 @@ const LeadsKanban = ({
         };
     }, [appliedFilters, acctId, collectionId, sortField, sortOrder, isSuperAdmin, responsibleFilter]);
 
+    // 1 combined call per stage-page (instead of 2 separate notes + reminders calls)
     const mergeCounts = useCallback((leadIds) => {
         if (!leadIds.length || !acctId) return;
-        Promise.allSettled([
-            notesApi.batchCounts(leadIds, acctId),
-            remindersApi.batchCounts(leadIds, acctId),
-        ]).then(([n, r]) => {
-            if (n.status === 'fulfilled') setNoteCounts(prev => ({ ...prev, ...(n.value.data?.data || {}) }));
-            if (r.status === 'fulfilled') setReminderCounts(prev => ({ ...prev, ...(r.value.data?.data || {}) }));
-        });
+        activityApi.batchCounts(leadIds, acctId).then(r => {
+            const d = r.data?.data || {};
+            if (d.notes)     setNoteCounts(prev => ({ ...prev, ...d.notes }));
+            if (d.reminders) setReminderCounts(prev => ({ ...prev, ...d.reminders }));
+        }).catch(() => {});
     }, [acctId, setNoteCounts, setReminderCounts]);
 
     const fetchPage = useCallback(async (stageId, page) => {
@@ -527,13 +525,16 @@ const LeadsKanban = ({
     }, [buildParams, mergeCounts]);
 
     // Reset + load page 1 for every stage whenever filters/sort/collection/refresh
-    // change, or a stage is added/removed.
+    // change, a stage is added/removed, or the kanban becomes the active view.
+    // Guard: skip while the grid view is active so switching to grid never triggers
+    // wasted kanban fetches (and switching to kanban fetches fresh data).
     useEffect(() => {
+        if (!isActive) return;
         inflightRef.current = {};
         setColumns({});
         stages.forEach(s => fetchPage(s.id, 1));
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filterSig, stageIdSig]);
+    }, [filterSig, stageIdSig, isActive]);
 
     const loadMore = useCallback((stageId) => {
         const col = columnsRef.current[stageId];

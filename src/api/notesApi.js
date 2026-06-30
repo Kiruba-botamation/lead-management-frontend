@@ -18,3 +18,8 @@ export const notesApi = {
     /** Get note counts for multiple leads (for grid badge highlights) */
     batchCounts: (leadIds, acctId)                  => api.post('/api/ui/activity/notes/batch-counts', { leadIds }, { params: { acctId } }),
 };
+
+/** Combined notes + reminders batch counts — 1 call instead of 2 */
+export const activityApi = {
+    batchCounts: (leadIds, acctId) => api.post('/api/ui/activity/batch-counts', { leadIds }, { params: { acctId } }),
+};
