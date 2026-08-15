@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
@@ -16,6 +17,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import Button from '../components/ui/Button';
 import AiAnalyticsChat from '../components/AiAnalyticsChat';
+import AppNavbar from '../components/AppNavbar';
 
 // ── Controlled dimension input for width/height ──
 const DimensionInput = ({ value, onCommit, min, max, className }) => {
@@ -68,21 +70,35 @@ const AnalyticsDashboardPage = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { acctNo, acctId, accountsLoaded } = useAccount();
-    const { userDetails } = useAuth();
+    const { userDetails, user: rawUser } = useAuth();
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(false);
     const [chartsReady, setChartsReady] = useState(false);
-    const [categoryFieldsCache, setCategoryFieldsCache] = useState({});
+    const [collectionFieldsCache, setCollectionFieldsCache] = useState({});
     const fieldsFetchPromisesRef = useRef({});
 
-    // Category state
-    const [categories, setCategories] = useState([]);
-    const [categoryLoading, setCategoryLoading] = useState(false);
+    // Collection state
+    const [collections, setCollections] = useState([]);
+    const [collectionLoading, setCollectionLoading] = useState(false);
 
     // Header smart-hide state
     const [headerVisible, setHeaderVisible] = useState(true);
     const lastScrollY = useRef(0);
     const inactivityTimer = useRef(null);
+
+    // Global navbar height — so the analytics sub-header pins right below it (both are sticky)
+    const navWrapRef = useRef(null);
+    const [navHeight, setNavHeight] = useState(0);
+    useEffect(() => {
+        const el = navWrapRef.current;
+        if (!el) return;
+        const measure = () => setNavHeight(el.offsetHeight);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        window.addEventListener('resize', measure);
+        return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+    }, []);
 
     // View As — admin selector
     const [viewAsAdmins, setViewAsAdmins] = useState([]);
@@ -222,7 +238,7 @@ const AnalyticsDashboardPage = () => {
         barOrientation: 'vertical',
         chartColor: null,
         autoRefreshMins: null,
-        chartCategory: null,
+        chartCollection: null,
         dateGranularity: 'day',
         showLegend: true,
         showDataLabels: true,
@@ -283,7 +299,7 @@ const AnalyticsDashboardPage = () => {
                 autoRefreshMins: chart.autoRefreshMins ?? null,
                 zAxis: chart.zAxis || null,
                 chartMode: chart.chartMode || null,
-                chartCategory: chart.chartCategory || null,
+                chartCollection: chart.chartCollection || null,
                 fieldLabels: chart.fieldLabels || {},
                 numberSplitCount: chart.numberSplitCount ?? 0,
                 dateGranularity: chart.dateGranularity || 'day',
@@ -581,7 +597,7 @@ const AnalyticsDashboardPage = () => {
     // fieldsFetchIdRef cancels stale fetchFieldsData completions
     const fieldsFetchIdRef = React.useRef(0);
 
-    // Reset all data-related fields when category changes
+    // Reset all data-related fields when collection changes
     const resetChartDataFields = (chartId) => {
         const todayISO = getTodayISO();
         setCharts(prev => prev.map(chart => {
@@ -627,8 +643,8 @@ const AnalyticsDashboardPage = () => {
             yAxis: chartConfig.yAxis.value,
             aggregation: chartConfig.aggregation.value === 'average' ? 'avg' : chartConfig.aggregation.value,
             acctId: acctIdRef.current,
-            ...(chartConfig.chartCategory?._id || chartConfig.chartCategory
-                ? { categoryId: chartConfig.chartCategory?._id || chartConfig.chartCategory }
+            ...(chartConfig.chartCollection?._id || chartConfig.chartCollection
+                ? { collectionId: chartConfig.chartCollection?._id || chartConfig.chartCollection }
                 : {}),
             ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis
                 ? { zAxis: chartConfig.zAxis.value }
@@ -671,12 +687,12 @@ const AnalyticsDashboardPage = () => {
         setCharts(prev => prev.map(chart => {
             if (chart.id === chartId) {
                 let updatedChart = { ...chart, [field]: value };
-                // When category changes: reset axis/aggregation fields and fetch new category fields
-                if (field === 'chartCategory') {
+                // When collection changes: reset axis/aggregation fields and fetch new collection fields
+                if (field === 'chartCollection') {
                     const todayISO = getTodayISO();
                     const catId = value?._id || value;
-                    if (catId) fetchFieldsForCategory(catId);
-                    // Reset dependent fields so X/Y axis options reflect the new category
+                    if (catId) fetchFieldsForCollection(catId);
+                    // Reset dependent fields so X/Y axis options reflect the new collection
                     updatedChart = {
                         ...updatedChart,
                         chartType: null,
@@ -731,14 +747,14 @@ const AnalyticsDashboardPage = () => {
         try {
             const xAxisValue = isNumber ? chartConfig.yAxis.value : chartConfig.xAxis.value;
             const isDateAxis = xAxisValue === 'createdAt' || xAxisValue === 'updatedAt';
-            // Use the chart's own category if set
-            const effectiveCategoryId = chartConfig.chartCategory?._id || chartConfig.chartCategory || null;
+            // Use the chart's own collection if set
+            const effectiveCollectionId = chartConfig.chartCollection?._id || chartConfig.chartCollection || null;
             const params = {
                 xAxis: xAxisValue,
                 yAxis: chartConfig.yAxis.value,
                 aggregation: chartConfig.aggregation.value === 'average' ? 'avg' : chartConfig.aggregation.value,
                 ...(currentAcctId && { acctId: currentAcctId }),
-                ...(effectiveCategoryId && { categoryId: effectiveCategoryId }),
+                ...(effectiveCollectionId && { collectionId: effectiveCollectionId }),
                 ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? { zAxis: chartConfig.zAxis.value } : {}),
                 ...(chartConfig.dateFilterFrom && { dateFrom: chartConfig.dateFilterFrom }),
                 ...(chartConfig.dateFilterTo && { dateTo: chartConfig.dateFilterTo }),
@@ -804,9 +820,9 @@ const AnalyticsDashboardPage = () => {
                             : editFields._datePreset === 'custom'
                                 ? { dateFilterFrom: editFields.dateFilterFrom || todayISO, dateFilterTo: editFields.dateFilterTo || todayISO }
                                 : {}),
-                        chartCategory: editFields.chartCategory
-                            ? { _id: editFields.chartCategory._id, categoryName: editFields.chartCategory.categoryName }
-                            : existing.chartCategory,
+                        chartCollection: editFields.chartCollection
+                            ? { _id: editFields.chartCollection._id, collectionName: editFields.chartCollection.collectionName }
+                            : existing.chartCollection,
                     };
                 });
             }
@@ -822,8 +838,8 @@ const AnalyticsDashboardPage = () => {
                     ...(cfg._datePreset && cfg._datePreset !== 'custom'
                         ? resolveDatesForPreset(cfg._datePreset, cfg._lastNDays)
                         : { dateFilterFrom: cfg.dateFilterFrom || todayISO, dateFilterTo: cfg.dateFilterTo || todayISO }),
-                    chartCategory: cfg.chartCategory
-                        ? { _id: cfg.chartCategory._id, categoryName: cfg.chartCategory.categoryName }
+                    chartCollection: cfg.chartCollection
+                        ? { _id: cfg.chartCollection._id, collectionName: cfg.chartCollection.collectionName }
                         : null,
                 }));
                 updated = [...updated, ...newCharts];
@@ -846,8 +862,8 @@ const AnalyticsDashboardPage = () => {
                     ...capturedAddedIds,
                 ]);
                 const affectedCharts = current.filter(c => affectedIds.has(c.id));
-                const usedCatIds = [...new Set(affectedCharts.map(c => c.chartCategory?._id).filter(Boolean))];
-                usedCatIds.forEach(catId => fetchFieldsForCategory(catId));
+                const usedCatIds = [...new Set(affectedCharts.map(c => c.chartCollection?._id).filter(Boolean))];
+                usedCatIds.forEach(catId => fetchFieldsForCollection(catId));
                 affectedCharts.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     const ready = isNum
@@ -905,11 +921,8 @@ const AnalyticsDashboardPage = () => {
     // Called when localStorage has no charts for the current viewingAs user.
     const handleSchemaSync = async (acctIdOverride, viewingAsOverride) => {
         const targetAcctId = acctIdOverride || acctId;
-        // Use Botamation adminId — this is the key AnalyticsSchema is stored under.
-        // Do NOT use _id (MongoDB _id), which is a different field.
-        const selectedAdminId = viewAsAdmin
-            ? String(viewAsAdmin.adminId || viewAsAdmin.id || viewAsAdmin._id || '')
-            : null;
+        // Schemas are keyed by the lead-app userId.
+        const selectedAdminId = viewAsAdmin ? String(viewAsAdmin.userId || '') : null;
         const targetViewingAs = selectedAdminId || viewingAsOverride || viewingAs;
         if (!targetAcctId || !targetViewingAs) {
             // Cannot sync — no account or user identity; unblock the UI
@@ -929,11 +942,11 @@ const AnalyticsDashboardPage = () => {
                 }
             });
             const responseData = res.data?.data;
-            const responseAdminId = responseData?.adminId;
-            // Only load if the response adminId matches the requested admin — never show another admin's charts
-            const adminIdMatches = responseAdminId && responseAdminId === targetViewingAs;
+            // The backend returns the schema for exactly the requested userId, so trust it.
+            // Guard with userId when present to never show another user's charts.
+            const userIdMatches = !responseData?.userId || responseData.userId === targetViewingAs;
 
-            if (res.data?.success && adminIdMatches && responseData?.schema) {
+            if (res.data?.success && userIdMatches && responseData?.schema) {
                 const remoteSchema = responseData.schema;
                 const store = readStore();
                 store[targetAcctId] = store[targetAcctId] || {};
@@ -951,8 +964,8 @@ const AnalyticsDashboardPage = () => {
                 setChartDataCache({});
 
                 // Fetch field schemas and chart data for restored charts
-                const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-                usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+                const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+                usedCollections.forEach(catId => fetchFieldsForCollection(catId));
                 restored.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     if (isNum ? (chart.yAxis && chart.aggregation) : (chart.xAxis && chart.yAxis && chart.aggregation)) {
@@ -1006,10 +1019,8 @@ const AnalyticsDashboardPage = () => {
         if (!acctId) return;
         setSchemaSaving(true);
         try {
-            const userId = localStorage.getItem('userId');
-
-            // Always save under the current logged-in user's admin ID, never the dropdown-selected admin's ID
-            const adminId = localStorage.getItem('currentUserAdmin') || userId;
+            // Always save under the current logged-in user's lead-app userId.
+            const userId = rawUser?.userId || localStorage.getItem('userId');
 
             const schema = readStore();
             const acctKey = acctId || 'default';
@@ -1017,12 +1028,10 @@ const AnalyticsDashboardPage = () => {
             const viewingKey = viewingAs || 'default';
             const userSchema = schema[acctKey]?.[viewingKey] || { filters: [] };
 
-            // Always save under currentUserAdmin — never under the dropdown-selected admin
+            // Schemas are keyed by userId on the backend — save under the caller's userId.
             await api.post('/api/ui/analytics/save-schema', {
                 userId: userId,
                 acctId: acctId,
-                adminId: adminId,
-                viewingAs: adminId,
                 schema: userSchema
             });
 
@@ -1334,12 +1343,12 @@ const AnalyticsDashboardPage = () => {
         setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
         setNextChartId(restored.length > 0 ? Math.max(...restored.map(c => c.id)) + 1 : 1);
         setChartDataCache({});
-        setCategoryFieldsCache({});
+        setCollectionFieldsCache({});
         fieldsFetchPromisesRef.current = {};
 
-        // Fetch field schemas for used categories
-        const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-        usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+        // Fetch field schemas for used collections
+        const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+        usedCollections.forEach(catId => fetchFieldsForCollection(catId));
 
         // Fetch initial data
         restored.forEach(chart => {
@@ -1358,41 +1367,41 @@ const AnalyticsDashboardPage = () => {
         saveCharts(acctId, viewingAs, charts);
     }, [charts, acctId, viewingAs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Fetch categories
-    const fetchCategories = async () => {
+    // Fetch collections
+    const fetchCollections = async () => {
         if (!acctId) return;
-        setCategoryLoading(true);
+        setCollectionLoading(true);
         try {
-            const response = await api.get('/api/ui/leads/categories', { params: { acctId } });
+            const response = await api.get('/api/ui/leads/collections', { params: { acctId } });
             const d = response.data;
-            const raw = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.categories) ? d.categories : [];
-            const filtered = raw.filter(item => item?._id && item?.categoryName);
-            setCategories(filtered);
+            const raw = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.collections) ? d.collections : [];
+            const filtered = raw.filter(item => item?._id && item?.collectionName);
+            setCollections(filtered);
         } catch (err) {
-            console.error('Error fetching categories:', err);
+            console.error('Error fetching collections:', err);
         } finally {
-            setCategoryLoading(false);
+            setCollectionLoading(false);
         }
     };
 
-    // Fetch categories when acctId changes
+    // Fetch collections when acctId changes
     useEffect(() => {
-        fetchCategories();
+        fetchCollections();
     }, [acctId]);
 
     // Fetch admins for View As dropdown.
-    // Runs once per account. Matches the logged-in user by email, sets viewingAs to their
-    // Botamation adminId, then lets the chart-loading effect handle localStorage vs backend.
+    // Runs once per account. Identifies the logged-in user by their lead-app userId,
+    // sets viewingAs to that userId (the key AnalyticsSchema is stored under), then lets
+    // the chart-loading effect handle localStorage vs backend.
     useEffect(() => {
         if (!acctId) return;
 
         // Already loaded for this account — prevent double-run when userDetails updates
         if (adminsLoadedForAcctRef.current === acctId) return;
 
-        // We need the user's email to match against the admin list.
-        // It is written to localStorage by AuthContext immediately after auth/profile load.
-        const userEmail = (userDetails?.email || localStorage.getItem('userEmail') || '').trim().toLowerCase();
-        if (!userEmail) return; // wait — userDetails not ready yet, effect will re-run
+        // The canonical identity is the lead-app userId (admin records no longer store email).
+        const currentUserId = rawUser?.userId || localStorage.getItem('userId') || '';
+        if (!currentUserId) return; // wait — auth not ready yet, effect will re-run
 
         adminsLoadedForAcctRef.current = acctId; // mark as loaded for this account
 
@@ -1408,33 +1417,25 @@ const AnalyticsDashboardPage = () => {
                     return;
                 }
 
-                // Helper: find admin by Botamation adminId (canonical key for AnalyticsSchema)
-                const findByPlatformId = (id) => id
-                    ? list.find(a => String(a.adminId || a.id || a._id || '') === String(id))
+                // Helper: find admin by lead-app userId (canonical key for AnalyticsSchema)
+                const findByUserId = (id) => id
+                    ? list.find(a => String(a.userId || '') === String(id))
                     : null;
 
-                // Match the current user's admin record by email
-                const currentUserAdmin = list.find(
-                    a => (a.email || a.emailId || a.email_id || '').trim().toLowerCase() === userEmail
-                );
-
-                if (currentUserAdmin) {
-                    const platformAdminId = String(currentUserAdmin.adminId || currentUserAdmin.id || currentUserAdmin._id || '');
-                    if (platformAdminId) {
-                        localStorage.setItem('currentUserAdmin', platformAdminId);
-                    }
-                }
+                // The current user's own admin record
+                const currentUserAdmin = findByUserId(currentUserId);
+                localStorage.setItem('currentUserAdmin', currentUserId);
 
                 // Resolve which admin to select:
                 //   1. A previously persisted "View As" choice (different admin, stored per account)
-                //   2. Default to the current user's own admin
+                //   2. Default to the current user's own record
                 const storedViewingAs = localStorage.getItem(`analyticsViewingAs_${acctId}`);
                 let adminToSelect = null;
                 if (storedViewingAs) {
-                    adminToSelect = findByPlatformId(storedViewingAs);
+                    adminToSelect = findByUserId(storedViewingAs);
                 }
                 if (!adminToSelect) {
-                    adminToSelect = currentUserAdmin || findByPlatformId(localStorage.getItem('currentUserAdmin'));
+                    adminToSelect = currentUserAdmin || findByUserId(localStorage.getItem('currentUserAdmin'));
                 }
 
                 if (!adminToSelect) {
@@ -1445,11 +1446,11 @@ const AnalyticsDashboardPage = () => {
 
                 setViewAsAdmin(adminToSelect);
 
-                // Set viewingAs to the Botamation adminId — this is the ONLY trigger for chart loading.
+                // Set viewingAs to the user's userId — this is the ONLY trigger for chart loading.
                 // The chart-loading effect [acctId, viewingAs] will fire next and:
                 //   - load from localStorage if a schema exists there (no backend call), or
                 //   - call handleSchemaSync (backend) if no localStorage schema exists.
-                const viewingAsId = String(adminToSelect.adminId || adminToSelect.id || adminToSelect._id || '');
+                const viewingAsId = String(adminToSelect.userId || '');
                 if (viewingAsId) {
                     setViewingAs(viewingAsId);
                 }
@@ -1458,7 +1459,7 @@ const AnalyticsDashboardPage = () => {
                 // Admins fetch failed — unblock the UI so it doesn't stay stuck on the loading mask
                 setChartsReady(true);
             });
-    }, [acctId, userDetails]);
+    }, [acctId, userDetails, rawUser]);
     // Handle View As selection change
     const handleViewAsChange = async (selectedAdmin) => {
         if (!acctId) {
@@ -1485,11 +1486,8 @@ const AnalyticsDashboardPage = () => {
         setChartsReady(false);
 
         try {
-            // Extract the selected user's ID — must be adminId (Botamation platform ID),
-            // which is the key used by AnalyticsSchema. Do NOT use _id (MongoDB _id).
-            const selectedUserId = selectedAdmin
-                ? (selectedAdmin.adminId || selectedAdmin.id || selectedAdmin._id || selectedAdmin.userId || selectedAdmin.authId || selectedAdmin.authUserId)
-                : null;
+            // Selected user's identity is the lead-app userId — the key AnalyticsSchema uses.
+            const selectedUserId = selectedAdmin ? (selectedAdmin.userId || null) : null;
 
             // Call backend with acctId, userId, and selectedUserId
             const response = await api.post('/api/ui/analytics/view-as', {
@@ -1518,8 +1516,8 @@ const AnalyticsDashboardPage = () => {
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
                 setChartDataCache({});
 
-                const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-                usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+                const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+                usedCollections.forEach(catId => fetchFieldsForCollection(catId));
                 restored.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     if (isNum ? (chart.yAxis && chart.aggregation) : (chart.xAxis && chart.yAxis && chart.aggregation)) {
@@ -1544,9 +1542,9 @@ const AnalyticsDashboardPage = () => {
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
                 setChartDataCache({});
 
-                // Fetch field schemas for used categories
-                const usedCategories = [...new Set(restored.map(c => c.chartCategory?._id || c.chartCategory).filter(Boolean))];
-                usedCategories.forEach(catId => fetchFieldsForCategory(catId));
+                // Fetch field schemas for used collections
+                const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
+                usedCollections.forEach(catId => fetchFieldsForCollection(catId));
 
                 // Fetch chart data
                 restored.forEach(chart => {
@@ -1599,44 +1597,46 @@ const AnalyticsDashboardPage = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [viewAsOpen]);
 
-    const fetchFieldsForCategory = async (catId) => {
+    const fetchFieldsForCollection = async (catId) => {
         if (!catId || !acctId) return [];
-        if (categoryFieldsCache[catId]?.length > 0) return categoryFieldsCache[catId];
-        // Use a single shared promise key per acctId so concurrent calls share one request
-        const promiseKey = `__all__${acctId}`;
+        if (collectionFieldsCache[catId]?.length > 0) return collectionFieldsCache[catId];
+        // Deduplicate concurrent requests for the same collection
+        const promiseKey = `${catId}__${acctId}`;
         if (fieldsFetchPromisesRef.current[promiseKey]) {
-            const allResults = await fieldsFetchPromisesRef.current[promiseKey];
-            return allResults[catId] || [];
+            return await fieldsFetchPromisesRef.current[promiseKey];
         }
 
         const promise = (async () => {
             try {
-                const response = await api.get('/api/ui/leads/fields', { params: { acctId } });
-                const raw = response.data;
+                const response = await api.get(`/api/ui/leads/collections/${catId}/fields`, { params: { acctId } });
+                const rawFields = response.data?.data?.fields || [];
+                const present = new Set(rawFields.map(f => f.field));
 
-                // Cache ALL categories' raw fields (no filtering here — filter at read time)
-                const allResults = {};
-                if (Array.isArray(raw?.categories)) {
-                    raw.categories.forEach(cat => {
-                        if (cat.categoryId && Array.isArray(cat.fields)) {
-                            allResults[cat.categoryId] = cat.fields.filter(f => typeof f === 'string');
-                        }
-                    });
-                }
+                // Ensure the selectable system axes (responsible, stage) are always
+                // available for charts, even when the collection stored its fields
+                // without them — otherwise a saved xAxis/yAxis of "responsible"/"stage"
+                // has no matching option on reload and appears to not persist.
+                const allFields = [
+                    ...rawFields,
+                    ...(!present.has('responsible') ? [{ field: 'responsible', label: 'Responsible', type: 'text', system: true }] : []),
+                    ...(!present.has('stage') ? [{ field: 'stage', label: 'Stage', type: 'stage', system: true }] : []),
+                    // Append system timestamp fields as column options
+                    { field: 'createdAt', label: 'Created At', type: 'date' },
+                    { field: 'updatedAt', label: 'Updated At', type: 'date' },
+                ];
 
-                setCategoryFieldsCache(prev => ({ ...prev, ...allResults }));
-                return allResults;
+                setCollectionFieldsCache(prev => ({ ...prev, [catId]: allFields }));
+                return allFields;
             } catch (err) {
                 console.error('Error fetching fields:', err);
-                return {};
+                return [];
             } finally {
                 delete fieldsFetchPromisesRef.current[promiseKey];
             }
         })();
 
         fieldsFetchPromisesRef.current[promiseKey] = promise;
-        const allResults = await promise;
-        return allResults[catId] || [];
+        return await promise;
     };
 
     // Get chart data from cache
@@ -1753,7 +1753,8 @@ const AnalyticsDashboardPage = () => {
         const anchor = goRight ? 'start' : 'end';
         const tx = ex + (goRight ? 4 : -4);
 
-        const rawName = lbl(name);
+        const resolved = lbl(name);
+        const rawName = resolved == null || resolved === '' ? '\u2014' : String(resolved);
         const maxLen = 15;
         const displayName = rawName.length > maxLen ? rawName.slice(0, maxLen - 1) + '\u2026' : rawName;
         const pct = (percent * 100).toFixed(1);
@@ -1772,7 +1773,7 @@ const AnalyticsDashboardPage = () => {
                 </text>
                 <text x={tx} y={ey + 8} textAnchor={anchor}
                     fill="#64748b" fontSize={9}>
-                    {value.toLocaleString()} ({pct}%)
+                    {(value ?? 0).toLocaleString()} ({pct}%)
                 </text>
             </g>
         );
@@ -2407,7 +2408,7 @@ const AnalyticsDashboardPage = () => {
         }
     })();
 
-    // Shared "Update Chart" button used in both header-row (with categories) and no-category bar
+    // Shared "Update Chart" button used in both header-row (with collections) and no-collection bar
     const renderUpdateChartButton = (chartConfig, mergedConfig) => {
         const id = chartConfig.id;
         const isLoading = submittingCharts[id] || chartLoadingState[id];
@@ -2442,10 +2443,12 @@ const AnalyticsDashboardPage = () => {
                 onClick={handleClick}
                 disabled={!isChartConfigured(mergedConfig) || (!isDirty && !isLoading)}
                 className={`btn-update flex items-center justify-center px-4 py-2.5 rounded-lg text-xs font-semibold
-                    bg-gradient-to-r from-indigo-600 to-violet-600 text-white
-                    shadow-md shadow-indigo-500/30
-                    transition-shadow duration-200
-                    ${isLoading ? 'cursor-wait' : !isDirty && !isSuccess ? 'cursor-not-allowed' : 'hover:shadow-indigo-500/50'}
+                    text-white transition-shadow duration-200
+                    ${showGray
+                        ? 'cursor-not-allowed shadow-none bg-none bg-gray-100'
+                        : isLoading
+                            ? 'cursor-wait bg-gradient-to-r from-indigo-600 to-violet-600 shadow-md shadow-indigo-500/30'
+                            : 'bg-gradient-to-r from-indigo-600 to-violet-600 shadow-md shadow-indigo-500/30 hover:shadow-indigo-500/50'}
                     ${isSuccess ? 'btn-update-success-ring' : ''}
                 `}
                 title={!isChartConfigured(mergedConfig)
@@ -2466,7 +2469,7 @@ const AnalyticsDashboardPage = () => {
                 />
                 {/* Content — re-keyed so animate-btn-state fires on every state change */}
                 <span key={contentKey} className="animate-btn-state relative flex items-center gap-1.5"
-                    style={{ color: showGray ? '#9ca3af' : 'white' }}>
+                    style={{ color: showGray ? '#6b7280' : 'white' }}>
                     {isLoading ? (
                         <>
                             <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
@@ -2494,15 +2497,28 @@ const AnalyticsDashboardPage = () => {
     const renderChartCard = (chartConfig) => {
         // mergedConfig = committed state + any pending (draft) changes from the slider
         const mergedConfig = getMergedConfig(chartConfig);
-        const catIdForFields = mergedConfig.chartCategory?._id || mergedConfig.chartCategory;
+        const catIdForFields = mergedConfig.chartCollection?._id || mergedConfig.chartCollection;
         const excludeAxisFields = ['__v', '_id'];
         const chartFields = catIdForFields
-            ? (categoryFieldsCache[catIdForFields] || []).filter(f => !excludeAxisFields.includes(f))
+            ? (collectionFieldsCache[catIdForFields] || []).filter(f => !excludeAxisFields.includes(f.field))
             : [];
-        const columns = chartFields.map(field => ({
-            value: field,
-            label: formatFieldName(field)
+        const columns = chartFields.map(f => ({
+            value: f.field,
+            label: f.label
         }));
+
+        // Guarantee the chart's currently-selected axes always appear as options, even
+        // if the fetched field list doesn't (yet) contain them — e.g. AI-created charts
+        // using "responsible"/"stage", or a collection whose fields haven't cached. This
+        // prevents the X/Y axis dropdowns from rendering empty for a configured chart.
+        const ensureAxisOption = (axis) => {
+            if (axis?.value && !columns.some(o => o.value === axis.value)) {
+                columns.push({ value: axis.value, label: axis.label || axis.value });
+            }
+        };
+        ensureAxisOption(mergedConfig.xAxis);
+        ensureAxisOption(mergedConfig.yAxis);
+        ensureAxisOption(mergedConfig.zAxis);
 
         const toISO = (d) => {
             const y = d.getFullYear();
@@ -2798,7 +2814,13 @@ const AnalyticsDashboardPage = () => {
                     })()}
                 </div>
 
-                {/* ── All controls — slides in when near top ── */}
+                {/* ── All controls — slides in when near top ──
+                    Portaled to <body>: this panel is `position: fixed` with viewport coords
+                    (top/left/width from getBoundingClientRect). The chart card runs an
+                    `animate-scale-in` animation (fill-mode both) which keeps the card under
+                    transform control — that makes the card a containing block for fixed
+                    descendants and offsets/clips this panel. Rendering into <body> escapes it. */}
+                {createPortal(
                 <div
                     key={filterHideCount}
                     className={`fixed bg-white z-[200] border border-gray-200 shadow-xl rounded-b-xl origin-top flex flex-col overflow-hidden
@@ -2821,25 +2843,25 @@ const AnalyticsDashboardPage = () => {
 
                 >
 
-                    {/* ── Category — always shown first ── */}
-                    {categories.length > 0 && (
+                    {/* ── Collection — always shown first ── */}
+                    {collections.length > 0 && (
                         <div className="flex items-center justify-center gap-2 px-5 pt-2 pb-2 border-b border-gray-100 relative pr-10">
-                            <span className="text-xs font-semibold text-gray-700 shrink-0">Category:</span>
+                            <span className="text-xs font-semibold text-gray-700 shrink-0">Collection:</span>
                             <div className="w-48">
                                 <Combobox
                                     value={
-                                        mergedConfig.chartCategory
-                                            ? (typeof mergedConfig.chartCategory === 'object'
-                                                ? mergedConfig.chartCategory._id
-                                                : mergedConfig.chartCategory)
+                                        mergedConfig.chartCollection
+                                            ? (typeof mergedConfig.chartCollection === 'object'
+                                                ? mergedConfig.chartCollection._id
+                                                : mergedConfig.chartCollection)
                                             : null
                                     }
                                     onChange={(val) => {
                                         const todayISO = getTodayISO();
-                                        if (val) fetchFieldsForCategory(val);
-                                        // Reset all query-dependent fields in pending when category changes
+                                        if (val) fetchFieldsForCollection(val);
+                                        // Reset all query-dependent fields in pending when collection changes
                                         updatePendingConfigBatch(chartConfig.id, {
-                                            chartCategory: val || null,
+                                            chartCollection: val || null,
                                             chartType: null,
                                             xAxis: null,
                                             yAxis: null,
@@ -2854,16 +2876,16 @@ const AnalyticsDashboardPage = () => {
                                             _lastNDays: 2,
                                         });
                                     }}
-                                    options={categories.map(c => ({ value: c._id, label: c.categoryName }))}
-                                    placeholder="Select category..."
+                                    options={collections.map(c => ({ value: c._id, label: c.collectionName }))}
+                                    placeholder="Select collection..."
                                     dropdownClassName="!z-[500] !min-w-[160px]"
                                 />
                             </div>
-                            {mergedConfig.chartCategory && (
-                                <UITooltip content="Clear category filter" placement="top">
+                            {mergedConfig.chartCollection && (
+                                <UITooltip content="Clear collection filter" placement="top">
                                     <button
                                         onClick={() => updatePendingConfigBatch(chartConfig.id, {
-                                            chartCategory: null,
+                                            chartCollection: null,
                                             chartType: null,
                                             xAxis: null,
                                             yAxis: null,
@@ -2878,7 +2900,7 @@ const AnalyticsDashboardPage = () => {
                                 </UITooltip>
                             )}
                             {/* ── Update Chart button in header row ── */}
-                            {mergedConfig.chartCategory && (
+                            {mergedConfig.chartCollection && (
                                 <div className="ml-auto flex items-center">
                                     {renderUpdateChartButton(chartConfig, mergedConfig)}
                                 </div>
@@ -2894,11 +2916,11 @@ const AnalyticsDashboardPage = () => {
                         </div>
                     )}
 
-                    {/* ── Rest of controls — only shown when category is selected (or no categories exist) ── */}
-                    {(categories.length === 0 || mergedConfig.chartCategory) && (
+                    {/* ── Rest of controls — only shown when collection is selected (or no collections exist) ── */}
+                    {(collections.length === 0 || mergedConfig.chartCollection) && (
                         <>
-                            {/* ── Action buttons bar — only when no categories (otherwise in Account Category header row) ── */}
-                            {categories.length === 0 && (
+                            {/* ── Action buttons bar — only when no collections (otherwise in Account Collection header row) ── */}
+                            {collections.length === 0 && (
                                 <div className="flex items-center justify-end px-5 pt-2 pb-1 border-b border-gray-100 shrink-0 relative pr-10">
                                     {renderUpdateChartButton(chartConfig, mergedConfig)}
 
@@ -3231,13 +3253,14 @@ const AnalyticsDashboardPage = () => {
                         </>
                     )}
 
-                    {/* ── Hint when category not yet selected ── */}
-                    {categories.length > 0 && !mergedConfig.chartCategory && (
+                    {/* ── Hint when collection not yet selected ── */}
+                    {collections.length > 0 && !mergedConfig.chartCollection && (
                         <div className="px-5 pb-4 pt-1 text-center">
-                            <p className="text-[11px] text-gray-400 italic">Select a category above to configure this chart.</p>
+                            <p className="text-[11px] text-gray-400 italic">Select a collection above to configure this chart.</p>
                         </div>
                     )}
                 </div>
+                , document.body)}
 
                 {/* Chart Display — fills remaining space */}
                 <div
@@ -3307,7 +3330,7 @@ const AnalyticsDashboardPage = () => {
                     </div>
                     <div className="text-center">
                         <span className="text-lg font-semibold text-gray-900">Loading Dashboard</span>
-                        <p className="text-sm text-gray-500 mt-1">Fetching your categories and charts...</p>
+                        <p className="text-sm text-gray-500 mt-1">Fetching your collections and charts...</p>
                     </div>
                 </div>
             </div>
@@ -3316,6 +3339,10 @@ const AnalyticsDashboardPage = () => {
 
     return (
         <>
+            <div ref={navWrapRef} className="sticky top-0 z-40">
+                <AppNavbar activePage="visualize" />
+            </div>
+
             {/* ── Save-warning modal: rendered at page root so it's never clipped by toolbar layout ── */}
             {saveWarningOpen && (
                 <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
@@ -3348,9 +3375,7 @@ const AnalyticsDashboardPage = () => {
                                     setSaveWarningOpen(false);
                                     const ownKey = localStorage.getItem('currentUserAdmin') || localStorage.getItem('userId') || 'default';
                                     await executeSchemaSave(ownKey);
-                                    const ownAdmin = viewAsAdmins.find(a =>
-                                        (a._id || a.id || a.adminId || a.userId || a.authId || a.authUserId) === ownKey
-                                    );
+                                    const ownAdmin = viewAsAdmins.find(a => String(a.userId || '') === ownKey);
                                     if (ownAdmin) {
                                         await handleViewAsChange(ownAdmin);
                                     }
@@ -3405,22 +3430,117 @@ const AnalyticsDashboardPage = () => {
             <div className="min-h-screen bg-gray-50 relative">
                 <LoadingMask loading={!chartsReady} title="Loading..." message="Please wait while we fetch your data" />
                 <div
-                    className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30"
+                    className="bg-white border-b border-gray-200 shadow-sm sticky z-30"
                     style={{
+                        top: navHeight,
                         transform: headerVisible ? 'translateY(0)' : 'translateY(-110%)',
                         transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
                     }}
                 >
                     <div className="w-full px-6 py-2">
                         <div className="flex justify-between items-center">
-                            <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                                <div className="group relative w-8 h-8 bg-transparent rounded-lg flex items-center justify-center border border-gray-300 hover:bg-blue-50 hover:border-blue-500 transition-all duration-300 hover:scale-110 focus:ring-1 focus:ring-blue-400">
-                                    <svg className="w-4 h-4 text-gray-600 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                    </svg>
-                                </div>
-                                Analytics Dashboard
-                            </h1>
+                            {/* View As dropdown — left of the header row */}
+                            <div ref={viewAsRef} className="relative">
+                                <UITooltip content="View As" placement="bottom">
+                                    <button
+                                        onClick={() => setViewAsOpen(o => !o)}
+                                        className="inline-flex items-center justify-between gap-1.5 h-8 w-max min-w-[9rem] px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all text-xs font-medium"
+                                    >
+                                        {viewAsAdmin ? (
+                                            getAdminAvatar(viewAsAdmin) && !viewAsAvatarError ? (
+                                                <img
+                                                    src={getAdminAvatar(viewAsAdmin)}
+                                                    alt=""
+                                                    className="w-5 h-5 rounded-full object-cover flex-shrink-0"
+                                                    onError={() => setViewAsAvatarError(true)}
+                                                />
+                                            ) : (
+                                                <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(viewAsAdmin) }}>
+                                                    {getAdminInitials(viewAsAdmin)}
+                                                </span>
+                                            )
+                                        ) : (
+                                            <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                        )}
+                                        <span className="whitespace-nowrap">
+                                            {viewAsAdmin ? getAdminDisplayName(viewAsAdmin) : 'View As'}
+                                        </span>
+                                        <svg className={`w-3 h-3 text-gray-400 transition-transform ${viewAsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+                                </UITooltip>
+                                {viewAsOpen && (
+                                    <div className="absolute left-0 top-full mt-1 min-w-full w-max bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 max-h-64 overflow-y-auto">
+                                        {(() => {
+                                            const currentUserAdminId = localStorage.getItem('currentUserAdmin');
+                                            const me = viewAsAdmins.find(a => String(a.userId || '') === currentUserAdminId);
+                                            const others = viewAsAdmins.filter(a => String(a.userId || '') !== currentUserAdminId);
+
+                                            const renderAdminBtn = (admin, idx) => {
+                                                const adminUserId = String(admin.userId || '');
+                                                const selectedUserId = String(viewAsAdmin?.userId || '');
+                                                const isSelected = adminUserId && adminUserId === selectedUserId;
+                                                const isMe = adminUserId === currentUserAdminId;
+                                                return (
+                                                    <button
+                                                        key={admin.userId || admin._id || idx}
+                                                        onClick={() => !isSelected && handleViewAsChange(admin)}
+                                                        disabled={isSelected}
+                                                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors
+                                                        ${isSelected
+                                                                ? 'font-semibold text-gray-900 bg-gray-100 cursor-not-allowed opacity-60'
+                                                                : 'text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer'
+                                                            }`}
+                                                    >
+                                                        {getAdminAvatar(admin) ? (
+                                                            <>
+                                                                <img
+                                                                    src={getAdminAvatar(admin)}
+                                                                    alt=""
+                                                                    className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                                                                    onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }}
+                                                                />
+                                                                <span style={{ display: 'none', background: getAdminColor(admin) }} className="w-6 h-6 rounded-full items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
+                                                                    {getAdminInitials(admin)}
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(admin) }}>
+                                                                {getAdminInitials(admin)}
+                                                            </span>
+                                                        )}
+                                                        <span className="truncate flex-1">{getAdminDisplayName(admin)}</span>
+                                                        {isMe && !isSelected && (
+                                                            <span className="text-[9px] font-semibold text-indigo-500 bg-indigo-50 border border-indigo-200 rounded px-1 py-0.5 flex-shrink-0">You</span>
+                                                        )}
+                                                        {isSelected && (
+                                                            <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                );
+                                            };
+
+                                            return (
+                                                <>
+                                                    {me && renderAdminBtn(me, 'me')}
+                                                    {me && others.length > 0 && (
+                                                        <div className="my-1 border-t border-gray-100" />
+                                                    )}
+                                                    {others.map((admin, idx) => renderAdminBtn(admin, idx))}
+                                                    {viewAsAdmins.length === 0 && (
+                                                        <p className="px-3 py-2 text-xs text-gray-400">No admins found</p>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                )}
+                            </div>
                             <div className="flex items-center gap-2">
                                 {/* Create with AI button — hidden when viewing another admin */}
                                 {!isViewingOtherAdmin && (
@@ -3522,108 +3642,6 @@ const AnalyticsDashboardPage = () => {
                                         </button>
                                     </UITooltip>
                                 )}
-                                {/* View As dropdown */}
-                                <div ref={viewAsRef} className="relative">
-                                    <UITooltip content="View As" placement="bottom">
-                                        <button
-                                            onClick={() => setViewAsOpen(o => !o)}
-                                            className="inline-flex items-center justify-between gap-1.5 h-8 w-max min-w-[9rem] px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all text-xs font-medium"
-                                        >
-                                            {viewAsAdmin ? (
-                                                getAdminAvatar(viewAsAdmin) && !viewAsAvatarError ? (
-                                                    <img
-                                                        src={getAdminAvatar(viewAsAdmin)}
-                                                        alt=""
-                                                        className="w-5 h-5 rounded-full object-cover flex-shrink-0"
-                                                        onError={() => setViewAsAvatarError(true)}
-                                                    />
-                                                ) : (
-                                                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(viewAsAdmin) }}>
-                                                        {getAdminInitials(viewAsAdmin)}
-                                                    </span>
-                                                )
-                                            ) : (
-                                                <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                                </svg>
-                                            )}
-                                            <span className="whitespace-nowrap">
-                                                {viewAsAdmin ? getAdminDisplayName(viewAsAdmin) : 'View As'}
-                                            </span>
-                                            <svg className={`w-3 h-3 text-gray-400 transition-transform ${viewAsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                        </button>
-                                    </UITooltip>
-                                    {viewAsOpen && (
-                                        <div className="absolute right-0 top-full mt-1 min-w-full w-max bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 max-h-64 overflow-y-auto">
-                                            {(() => {
-                                                const currentUserAdminId = localStorage.getItem('currentUserAdmin');
-                                                const me = viewAsAdmins.find(a => String(a.adminId || a.id || a._id || '') === currentUserAdminId);
-                                                const others = viewAsAdmins.filter(a => String(a.adminId || a.id || a._id || '') !== currentUserAdminId);
-
-                                                const renderAdminBtn = (admin, idx) => {
-                                                    const adminPlatformId = String(admin.adminId || admin.id || admin._id || '');
-                                                    const selectedPlatformId = String(viewAsAdmin?.adminId || viewAsAdmin?.id || viewAsAdmin?._id || '');
-                                                    const isSelected = adminPlatformId && adminPlatformId === selectedPlatformId;
-                                                    const isMe = adminPlatformId === currentUserAdminId;
-                                                    return (
-                                                        <button
-                                                            key={admin.adminId || admin._id || idx}
-                                                            onClick={() => !isSelected && handleViewAsChange(admin)}
-                                                            disabled={isSelected}
-                                                            className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors
-                                                            ${isSelected
-                                                                    ? 'font-semibold text-gray-900 bg-gray-100 cursor-not-allowed opacity-60'
-                                                                    : 'text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer'
-                                                                }`}
-                                                        >
-                                                            {getAdminAvatar(admin) ? (
-                                                                <>
-                                                                    <img
-                                                                        src={getAdminAvatar(admin)}
-                                                                        alt=""
-                                                                        className="w-6 h-6 rounded-full object-cover flex-shrink-0"
-                                                                        onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }}
-                                                                    />
-                                                                    <span style={{ display: 'none', background: getAdminColor(admin) }} className="w-6 h-6 rounded-full items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
-                                                                        {getAdminInitials(admin)}
-                                                                    </span>
-                                                                </>
-                                                            ) : (
-                                                                <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: getAdminColor(admin) }}>
-                                                                    {getAdminInitials(admin)}
-                                                                </span>
-                                                            )}
-                                                            <span className="truncate flex-1">{getAdminDisplayName(admin)}</span>
-                                                            {isMe && !isSelected && (
-                                                                <span className="text-[9px] font-semibold text-indigo-500 bg-indigo-50 border border-indigo-200 rounded px-1 py-0.5 flex-shrink-0">You</span>
-                                                            )}
-                                                            {isSelected && (
-                                                                <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                                                </svg>
-                                                            )}
-                                                        </button>
-                                                    );
-                                                };
-
-                                                return (
-                                                    <>
-                                                        {me && renderAdminBtn(me, 'me')}
-                                                        {me && others.length > 0 && (
-                                                            <div className="my-1 border-t border-gray-100" />
-                                                        )}
-                                                        {others.map((admin, idx) => renderAdminBtn(admin, idx))}
-                                                        {viewAsAdmins.length === 0 && (
-                                                            <p className="px-3 py-2 text-xs text-gray-400">No admins found</p>
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
-                                        </div>
-                                    )}
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -3715,7 +3733,7 @@ const AnalyticsDashboardPage = () => {
                 isOpen={aiChatOpen}
                 onClose={() => setAiChatOpen(false)}
                 acctId={acctId}
-                categories={categories}
+                collections={collections}
                 currentCharts={charts}
                 onAddCharts={handleAiChartsGenerated}
             />

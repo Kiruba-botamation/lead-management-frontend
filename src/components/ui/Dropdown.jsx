@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import PropTypes from 'prop-types';
 import '../../styles/components/dropdown.css';
 
@@ -13,23 +14,30 @@ import '../../styles/components/dropdown.css';
  *   trigger   – React node that opens the menu (required)
  *   align     – 'left' | 'right' | 'center'  (default 'left')
  *   direction – 'bottom' | 'top'              (default 'bottom')
+ *   portal    – render menu via createPortal to avoid overflow clipping (default false)
  *   children  – <DropdownItem>, <DropdownSection>, <DropdownSeparator> etc.
  */
 export function Dropdown({
   trigger,
   align = 'left',
   direction = 'bottom',
+  portal = false,
   className = '',
   children,
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [open, setOpen]       = useState(false);
+  const [menuStyle, setMenuStyle] = useState({});
+  const ref        = useRef(null);
+  const triggerRef = useRef(null);
+  const menuRef    = useRef(null);
 
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      const inTrigger = ref.current && ref.current.contains(e.target);
+      const inMenu    = menuRef.current && menuRef.current.contains(e.target);
+      if (!inTrigger && !inMenu) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -43,11 +51,54 @@ export function Dropdown({
     return () => document.removeEventListener('keydown', handler);
   }, [open]);
 
+  // Compute portal menu position from trigger bounding rect
+  const handleOpen = () => {
+    if (portal && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const style = { position: 'fixed', zIndex: 9999, minWidth: rect.width };
+
+      if (direction === 'top') {
+        style.bottom = window.innerHeight - rect.top;
+        style.top    = 'auto';
+      } else {
+        style.top    = rect.bottom;
+        style.bottom = 'auto';
+      }
+
+      if (align === 'right') {
+        style.right = window.innerWidth - rect.right;
+        style.left  = 'auto';
+      } else if (align === 'center') {
+        style.left = rect.left + rect.width / 2;
+        style.transform = 'translateX(-50%)';
+      } else {
+        style.left  = rect.left;
+        style.right = 'auto';
+      }
+
+      setMenuStyle(style);
+    }
+    setOpen((v) => !v);
+  };
+
   const menuClasses = [
     'ds-dropdown__menu',
-    `ds-dropdown__menu--${align}`,
-    `ds-dropdown__menu--${direction}`,
-  ].join(' ');
+    portal ? '' : `ds-dropdown__menu--${align}`,
+    portal ? '' : `ds-dropdown__menu--${direction}`,
+  ].filter(Boolean).join(' ');
+
+  const menu = open && (
+    <div
+      ref={menuRef}
+      className={menuClasses}
+      role="menu"
+      style={portal ? menuStyle : undefined}
+      onMouseDown={portal ? (e) => e.preventDefault() : undefined}
+      onClick={() => setOpen(false)}
+    >
+      {children}
+    </div>
+  );
 
   return (
     <div
@@ -55,20 +106,12 @@ export function Dropdown({
       className={['ds-dropdown', open ? 'ds-dropdown--open' : '', className].filter(Boolean).join(' ')}
     >
       {/* Trigger */}
-      <div onClick={() => setOpen((v) => !v)} aria-haspopup="true" aria-expanded={open}>
+      <div ref={triggerRef} onClick={handleOpen} aria-haspopup="true" aria-expanded={open}>
         {trigger}
       </div>
 
-      {/* Menu */}
-      {open && (
-        <div
-          className={menuClasses}
-          role="menu"
-          onClick={() => setOpen(false)}
-        >
-          {children}
-        </div>
-      )}
+      {/* Menu — portalled or inline */}
+      {portal ? createPortal(menu, document.body) : menu}
     </div>
   );
 }
@@ -128,6 +171,7 @@ Dropdown.propTypes = {
   trigger:   PropTypes.node.isRequired,
   align:     PropTypes.oneOf(['left', 'right', 'center']),
   direction: PropTypes.oneOf(['bottom', 'top']),
+  portal:    PropTypes.bool,
   className: PropTypes.string,
   children:  PropTypes.node,
 };

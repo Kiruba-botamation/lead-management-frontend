@@ -194,7 +194,8 @@
 
 /* -- Full width --------------------------------------------- */
 .btn--block {
-  width: 100%;
+  width:       100%;
+  display:     flex;       /* override inline-flex so width: 100% works in all flex contexts */
 }
 
 /* -- Loading state ------------------------------------------ */

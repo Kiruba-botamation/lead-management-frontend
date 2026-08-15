@@ -2,11 +2,15 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import ApiTab from './settings/ApiTab';
+import CollectionTab from './settings/CollectionTab';
+import WebhooksTab from './settings/WebhooksTab';
 import DeleteAccountPage from './settings/DeleteAccountPage';
 import AppNavbar from '../components/AppNavbar';
 
 const TABS = [
-    { id: 'api', label: 'API Key' },
+    { id: 'collection',    label: 'Collection'     },
+    { id: 'api',           label: 'API'             },
+    { id: 'webhooks',      label: 'Webhooks'        },
     { id: 'deleteAccount', label: 'Delete Account' },
 ];
 
@@ -15,7 +19,7 @@ const SettingsPage = () => {
     const location = useLocation();
     const { acctId, acctNo } = useAccount();
 
-    const [activeTab, setActiveTab] = useState('api');
+    const [activeTab, setActiveTab] = useState('collection');
 
     // Read ?acc= from URL for DeleteAccountPage
     const accountFromUrl = new URLSearchParams(location.search).get('acc') || acctNo || '';
@@ -50,6 +54,12 @@ const SettingsPage = () => {
                     <div className="p-6">
                         {activeTab === 'api' && (
                             <ApiTab acctId={acctId} />
+                        )}
+                        {activeTab === 'collection' && (
+                            <CollectionTab />
+                        )}
+                        {activeTab === 'webhooks' && (
+                            <WebhooksTab acctId={acctId} />
                         )}
                         {activeTab === 'deleteAccount' && (
                             <DeleteAccountPage

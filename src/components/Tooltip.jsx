@@ -109,6 +109,7 @@ export default function Tooltip({
         ref={wrapperRef}
         onMouseEnter={show}
         onMouseLeave={hide}
+        onMouseDown={hide}
         onFocus={show}
         onBlur={hide}
         style={{ display: 'inline-flex' }}

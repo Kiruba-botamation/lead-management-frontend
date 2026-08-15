@@ -3,15 +3,24 @@
  * User enters an Account Number, then clicks "Verify" to check it against the backend.
  * On success, links the account directly.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../api/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from './Notifications';
+import { getAcctNoFromUrl } from '../utils/accountHelpers';
 import Button from './ui/Button';
 
 const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
     const { user, userDetails } = useAuth();
     const [acctNo, setAcctNo] = useState('');
+
+    // Prefill the account number from the ?acc= URL param when the dialog opens
+    // (e.g. a shared link to an account that isn't linked yet).
+    useEffect(() => {
+        if (!isOpen) return;
+        const urlAcctNo = getAcctNoFromUrl();
+        if (urlAcctNo) setAcctNo((prev) => prev || urlAcctNo);
+    }, [isOpen]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [isLinked, setIsLinked] = useState(false);
@@ -33,12 +42,15 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
         try {
             const userId = user?.userId || localStorage.getItem('userId') || '';
             const userEmail = userDetails?.email || user?.email || '';
+            const userPhone = userDetails?.phone || '';
 
-            // Verify the account number against the lead-management backend
+            // Verify the account number against the lead-management backend.
+            // email/phone seed the admin record's contact details from the user profile.
             const response = await api.post('/api/ui/accounts/verify', {
                 acctNo: acctNo.trim(),
                 userId,
                 email: userEmail,
+                phone: userPhone,
             });
 
             const data = response.data;

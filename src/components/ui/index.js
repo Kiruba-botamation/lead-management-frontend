@@ -80,3 +80,7 @@ export {
   Combobox,
   Select,
 } from './Combobox';
+
+// Date & Time Pickers
+export { default as DatePicker } from './DatePicker';
+export { default as TimePicker } from './TimePicker';

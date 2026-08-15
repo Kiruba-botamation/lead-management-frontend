@@ -1,132 +1,209 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { Fragment, useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { Transition } from '@headlessui/react';
 
-export default function Notify({ message, type, key, onClose }) {
-    const [show, setShow] = useState(true);
+// ── Per-type theme (sourced from design tokens in styles/tokens.css) ───────────
+
+const THEME = {
+    success:  { accent: 'var(--color-success-600)',   tint: 'var(--color-success-50)',    label: 'Success' },
+    warning:  { accent: 'var(--color-warning-500)',   tint: 'var(--color-warning-50)',    label: 'Warning' },
+    error:    { accent: 'var(--color-danger-600)',    tint: 'var(--color-danger-50)',     label: 'Error' },
+    reminder: { accent: 'var(--color-secondary-600)', tint: 'var(--color-secondary-100)', label: 'Notification' },
+};
+
+// Auto-close durations (ms). Only success auto-closes; the rest stay open.
+const AUTO_CLOSE_MS = {
+    success: 2500,
+};
+
+// ── Icon helpers ──────────────────────────────────────────────────────────────
+
+function getIcon(type) {
+    const color = (THEME[type] || {}).accent || 'var(--color-gray-400)';
+    switch (type) {
+        case 'success':
+            return (
+                <svg aria-hidden="true" className="size-5" style={{ color }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            );
+        case 'error':
+            return (
+                <svg aria-hidden="true" className="size-5" style={{ color }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            );
+        case 'warning':
+            return (
+                <svg aria-hidden="true" className="size-5" style={{ color }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            );
+        case 'reminder':
+            return (
+                <svg aria-hidden="true" className="size-6" style={{ color }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+            );
+        default:
+            return null;
+    }
+}
+
+// ── Notify component ──────────────────────────────────────────────────────────
+
+/**
+ * @param {object|string} message  - String for success/error/warning.
+ *                                   Object { leadName, leadPhone, description, title, isPre }
+ *                                   for reminder type.
+ * @param {string}  type           - 'success' | 'error' | 'warning' | 'reminder'
+ * @param {any}     key            - React key — change to reset timer
+ * @param {function} onClose       - Called when dismissed
+ * @param {function} [onClick]     - Called when the toast body is clicked (reminder type)
+ */
+export default function Notify({ message, type, key, onClose, onClick }) {
+    const [show,     setShow]     = useState(true);
     const [progress, setProgress] = useState(100);
+
+    const duration = AUTO_CLOSE_MS[type];  // undefined → no auto-close
+    const theme    = THEME[type] || { accent: 'var(--color-gray-400)', tint: 'var(--color-gray-50)', label: '' };
 
     useEffect(() => {
         setShow(true);
         setProgress(100);
 
-        const duration = 2500; // 2.5 seconds
-        const interval = 30; // Update every 30ms for smooth animation
-        const steps = duration / interval;
+        if (!duration) return undefined;
+
+        const interval  = 30;
+        const steps     = duration / interval;
         const decrement = 100 / steps;
 
-        // Progress bar countdown for both success and error
         const progressTimer = setInterval(() => {
-            setProgress((prev) => {
-                const newProgress = prev - decrement;
-                return newProgress > 0 ? newProgress : 0;
+            setProgress(prev => {
+                const next = prev - decrement;
+                return next > 0 ? next : 0;
             });
         }, interval);
 
-        // Only auto-close for success notifications
-        if (type === 'success') {
-            const closeTimer = setTimeout(() => {
-                setShow(false);
-                setTimeout(() => {
-                    onClose(); // Call onClose callback after animation completes
-                }, 300);
-            }, duration);
+        const closeTimer = setTimeout(() => {
+            setShow(false);
+            setTimeout(onClose, 200);
+        }, duration);
 
-            return () => {
-                clearInterval(progressTimer);
-                clearTimeout(closeTimer);
-            };
-        }
+        return () => { clearInterval(progressTimer); clearTimeout(closeTimer); };
+    }, [key, type, onClose, message]); // eslint-disable-line react-hooks/exhaustive-deps
 
-        // For error and warning: just clear the progress timer, don't auto-close
-        return () => {
-            clearInterval(progressTimer);
-        };
-    }, [key, type, onClose, message]);
-
-    const getIcon = () => {
-        switch (type) {
-            case 'success':
-                return (
-                    <svg aria-hidden="true" className="size-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                );
-            case 'error':
-                return (
-                    <svg aria-hidden="true" className="size-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                );
-            case 'warning':
-                return (
-                    <svg aria-hidden="true" className="size-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                );
-            default:
-                return null;
-        }
-    };
-
-    const borderColorClass = type === 'success'
-        ? 'border-green-500'
-        : type === 'warning'
-            ? 'border-yellow-500'
-            : 'border-red-500';
-
-    const handleClose = () => {
+    const handleClose = (e) => {
+        e.stopPropagation();
         setShow(false);
-        onClose(); // Call onClose callback when the close button is clicked
+        onClose();
     };
+
+    const handleBodyClick = () => {
+        if (onClick) {
+            onClick();
+            setShow(false);
+            onClose();
+        }
+    };
+
+    // ── Reminder / Notification body (rich) ─────────────────────────────────────
+    const reminderBody = type === 'reminder' ? (
+        <div className="ml-3 w-0 flex-1">
+            <div className="flex justify-between items-center mb-1">
+                <span style={{
+                    fontSize:        'var(--text-2xs)',
+                    fontWeight:      'var(--font-bold)',
+                    letterSpacing:   'var(--tracking-wider)',
+                    textTransform:   'uppercase',
+                    color:           'var(--color-secondary-600)',
+                    background:      'var(--color-secondary-100)',
+                    borderRadius:    'var(--radius-sm)',
+                    padding:         '1px 6px',
+                }}>
+                    {message.isPre ? 'Pre-Reminder' : 'Reminder'}
+                </span>
+                <button type="button" onClick={handleClose}
+                    className="inline-flex rounded-md text-gray-400 hover:text-gray-500 focus:outline-none">
+                    <svg className="size-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            {message.leadName && (
+                <p className="text-sm font-semibold text-gray-900 mb-0.5">{message.leadName}</p>
+            )}
+            {message.leadPhone && (
+                <p className="text-xs text-gray-500 mb-0.5">{message.leadPhone}</p>
+            )}
+            <p className="text-sm text-gray-700 line-clamp-2">{message.description}</p>
+            {onClick && (
+                <p style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-secondary-600)', marginTop: '4px', fontWeight: 'var(--font-medium)' }}>
+                    Click to open lead
+                </p>
+            )}
+        </div>
+    ) : null;
+
+    // ── Standard body — single line: Type + message ─────────────────────────────
+    const standardText = typeof message === 'object' ? message.description : message;
+    const standardBody = type !== 'reminder' ? (
+        <div className="ml-3 w-0 flex-1 flex items-start justify-between gap-2">
+            <p className="text-sm text-gray-800 line-clamp-2">
+                <span className="font-bold" style={{ color: theme.accent }}>{theme.label}</span>
+                <span className="text-gray-400">{' — '}</span>
+                <span className="text-gray-800">{standardText}</span>
+            </p>
+            <button type="button" onClick={handleClose}
+                className="shrink-0 inline-flex rounded-md text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1">
+                <svg className="size-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    ) : null;
 
     return (
-        <div aria-live="assertive" className="pointer-events-none flex w-full flex-col items-end space-y-4">
+        <div
+            className="pointer-events-none shrink-0"
+            style={{ width: 'min(50vw, 640px)', maxWidth: '92vw' }}
+        >
             <Transition
+                as={Fragment}
                 show={show}
-                enter="transform transition duration-300"
-                enterFrom="translate-y-full opacity-0"
+                enter="transform transition duration-300 ease-[cubic-bezier(0.34,1.2,0.64,1)]"
+                enterFrom="-translate-y-[150%] opacity-0"
                 enterTo="translate-y-0 opacity-100"
-                leave="transform transition duration-200"
+                leave="transform transition duration-200 ease-in"
                 leaveFrom="translate-y-0 opacity-100"
-                leaveTo="translate-y-full opacity-0"
+                leaveTo="-translate-y-[150%] opacity-0"
             >
                 <div
-                    className={`pointer-events-auto w-96 max-w-full overflow-hidden rounded-lg bg-white shadow-xl ring-1 ring-black/5 border-l-4 ${borderColorClass}`}
-                    onClick={handleClose}
+                    aria-live="assertive"
+                    className={`pointer-events-auto w-full overflow-hidden ${onClick ? 'cursor-pointer' : ''}`}
+                    style={{
+                        background:    'var(--color-surface)',
+                        borderRadius:  'var(--radius-lg)',
+                        boxShadow:     'var(--shadow-lg)',
+                        borderLeft:    `4px solid ${theme.accent}`,
+                    }}
+                    onClick={handleBodyClick}
                 >
-                    <div className="p-4">
+                    <div className="px-4 py-2.5" style={{ background: theme.tint }}>
                         <div className="flex items-start">
-                            <div className="shrink-0">
-                                {getIcon()}
-                            </div>
-
-                            <div className="ml-3 w-0 flex-1">
-                                <div className="flex justify-between items-center mb-2">
-                                    <p className="text-sm font-bold text-gray-900">{message.title}</p>
-                                    <button
-                                        type="button"
-                                        onClick={handleClose}
-                                        className="inline-flex rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                    >
-                                        {/* X mark icon */}
-                                        <svg className="size-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
-                                </div>
-                                <div className="text-left">
-                                    <p className="text-sm text-gray-800">{message.description}</p>
-                                </div>
-                            </div>
+                            <div className="shrink-0">{getIcon(type)}</div>
+                            {reminderBody}
+                            {standardBody}
                         </div>
                     </div>
-                    {/* Progress bar for success and error notifications */}
-                    {(type === 'success' || type === 'error') && (
-                        <div className="h-1 bg-gray-200">
+
+                    {/* Progress bar — only for auto-closing (success) */}
+                    {duration && (
+                        <div className="h-1" style={{ background: 'var(--color-gray-200)' }}>
                             <div
-                                className={`h-full transition-all duration-75 ease-linear ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}
-                                style={{ width: `${progress}%` }}
+                                className="h-full transition-all duration-75 ease-linear"
+                                style={{ width: `${progress}%`, background: theme.accent }}
                             />
                         </div>
                     )}
@@ -136,55 +213,58 @@ export default function Notify({ message, type, key, onClose }) {
     );
 }
 
+// ── useNotifications hook ─────────────────────────────────────────────────────
+
 export const useNotifications = () => {
-    const [notification, setNotification] = useState(null);
+    const [notification,    setNotification]    = useState(null);
     const [notificationKey, setNotificationKey] = useState(0);
 
+    const bump = () => setNotificationKey(k => k + 1);
+
     const showSuccess = useCallback((message) => {
-        setNotification({
-            message: {
-                title: 'Success',
-                description: message,
-            },
-            type: 'success',
-        });
-        setNotificationKey((prevKey) => prevKey + 1);
+        setNotification({ message: { title: 'Success', description: message }, type: 'success' });
+        bump();
     }, []);
 
     const showError = useCallback((message) => {
-        setNotification({
-            message: {
-                title: 'Error',
-                description: message,
-            },
-            type: 'error',
-        });
-        setNotificationKey((prevKey) => prevKey + 1);
+        setNotification({ message: { title: 'Error', description: message }, type: 'error' });
+        bump();
     }, []);
 
     const showWarning = useCallback((message) => {
-        setNotification({
-            message: {
-                title: 'Warning',
-                description: message,
-            },
-            type: 'warning',
-        });
-        setNotificationKey((prevKey) => prevKey + 1);
+        setNotification({ message: { title: 'Warning', description: message }, type: 'warning' });
+        bump();
     }, []);
 
-    const clearNotification = useCallback(() => {
-        setNotification(null);
+    /**
+     * Show a violet reminder/notification toast.
+     * @param {{ leadId, leadName, leadPhone, description, isPre }} payload
+     * @param {function} [onClickCb] — called when user clicks the toast body
+     */
+    const showReminder = useCallback((payload, onClickCb) => {
+        setNotification({ message: payload, type: 'reminder', onClick: onClickCb || null });
+        bump();
     }, []);
+
+    const clearNotification = useCallback(() => setNotification(null), []);
 
     const NotificationComponent = () => ReactDOM.createPortal(
-        <div className="pointer-events-none fixed top-0 right-0 flex items-start px-4 py-6 sm:p-6 z-[9999]">
+        <div
+            className="pointer-events-none fixed top-0 left-0 w-full flex justify-center px-4"
+            style={{ paddingTop: 'var(--space-2)', zIndex: 'var(--z-toast)' }}
+        >
             {notification && (
-                <Notify key={notificationKey} message={notification.message} type={notification.type} onClose={clearNotification} />
+                <Notify
+                    key={notificationKey}
+                    message={notification.message}
+                    type={notification.type}
+                    onClick={notification.onClick}
+                    onClose={clearNotification}
+                />
             )}
         </div>,
         document.body
     );
 
-    return { showSuccess, showError, showWarning, clearNotification, NotificationComponent };
+    return { showSuccess, showError, showWarning, showReminder, clearNotification, NotificationComponent };
 };

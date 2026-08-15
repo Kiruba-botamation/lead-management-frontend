@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { AUTH_SERVICE_URL } from './api/axiosConfig';
 
-const ProtectedRoute = ({ children, roles }) => {
-    const { user, authenticated, loading } = useAuth();
+const ProtectedRoute = ({ children, roles, requireSuperadmin, requireAdmin }) => {
+    const { user, authenticated, loading, accessLevel, adminResolved } = useAuth();
 
     // Redirect to SSO login when auth check is complete and user is not authenticated.
     // Uses window.location.href (the actual page URL) so that after login the user
@@ -53,12 +54,35 @@ const ProtectedRoute = ({ children, roles }) => {
         }
     }
 
+    // Admin-gated pages — wait for the per-account admin lookup, then enforce.
+    // requireSuperadmin: Settings (collections/API/webhooks) — superadmin only.
+    // requireAdmin: Admin tab — any admin level (admin or superadmin); the tab itself
+    //   restricts a plain admin to their own record and hides rights editing.
+    if (requireSuperadmin || requireAdmin) {
+        if (!adminResolved) {
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
+                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-blue-500 mb-4"></div>
+                    <p className="text-gray-600 text-lg">Checking access...</p>
+                </div>
+            );
+        }
+        const allowed = requireSuperadmin
+            ? accessLevel === 'superadmin'
+            : (accessLevel === 'superadmin' || accessLevel === 'admin');
+        if (!allowed) {
+            return <Navigate to="/leads" replace />;
+        }
+    }
+
     return <>{children}</>;
 };
 
 ProtectedRoute.propTypes = {
     children: PropTypes.node.isRequired,
     roles: PropTypes.arrayOf(PropTypes.string),
+    requireSuperadmin: PropTypes.bool,
+    requireAdmin: PropTypes.bool,
 };
 
 export default ProtectedRoute;

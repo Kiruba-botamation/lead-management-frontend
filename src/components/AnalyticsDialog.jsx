@@ -273,7 +273,7 @@ const ChartRenderer = ({ chartConfig, fetchChartData }) => {
     );
 
     if (!chartConfig.chartType) return <div className="text-center py-12 text-gray-500 text-sm">Select chart type to begin</div>;
-    if (!chartConfig.xAxis) return <div className="text-center py-12 text-gray-500 text-sm">{chartConfig.chartType?.value === 'pie' ? 'Select Category' : 'Select X axis'}</div>;
+    if (!chartConfig.xAxis) return <div className="text-center py-12 text-gray-500 text-sm">{chartConfig.chartType?.value === 'pie' ? 'Select Collection' : 'Select X axis'}</div>;
     if (!chartConfig.yAxis) return <div className="text-center py-12 text-gray-500 text-sm">{chartConfig.chartType?.value === 'pie' ? 'Select Value' : 'Select Y axis'}</div>;
     if (!chartConfig.aggregation) return <div className="text-center py-12 text-gray-500 text-sm">Select aggregation type</div>;
     if (!chartData.length) return <div className="text-center py-12 text-gray-500 text-sm">No data available</div>;
@@ -438,7 +438,10 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
     const fetchLeadsData = async () => {
         setLoading(true);
         try {
-            const params = { limit: 1000, ...(acctId && { acctId }) };
+            // Scope to the active collection so the axis options include that
+            // collection's custom fields (plus the system + stage fields).
+            const collectionId = acctId ? (() => { try { const s = localStorage.getItem('selectedCollection'); const p = s ? JSON.parse(s) : {}; return (p && typeof p === 'object' && !Array.isArray(p)) ? (p[acctId] ?? null) : null; } catch { return null; } })() : null;
+            const params = { limit: 1000, ...(acctId && { acctId }), ...(collectionId && { collectionId }) };
             const response = await api.get('/api/ui/leads', { params });
             setLeads(response.data.data || []);
 
@@ -461,14 +464,14 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
         }
 
         // Create cache key
-        const categoryId = acctId ? (() => { try { const s = localStorage.getItem('selectedCategory'); const p = s ? JSON.parse(s) : {}; return (p && typeof p === 'object' && !Array.isArray(p)) ? (p[acctId] ?? null) : null; } catch { return null; } })() : null;
+        const collectionId = acctId ? (() => { try { const s = localStorage.getItem('selectedCollection'); const p = s ? JSON.parse(s) : {}; return (p && typeof p === 'object' && !Array.isArray(p)) ? (p[acctId] ?? null) : null; } catch { return null; } })() : null;
         const cacheKey = JSON.stringify({
             xAxis: chartConfig.xAxis.value,
             yAxis: chartConfig.yAxis.value,
             aggregation: chartConfig.aggregation.value,
             dateFilterFrom: chartConfig.dateFilterFrom || '',
             dateFilterTo: chartConfig.dateFilterTo || '',
-            categoryId: categoryId || '',
+            collectionId: collectionId || '',
             zAxis: (chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? chartConfig.zAxis.value : '',
             chartMode: chartConfig.chartMode || ''
         });
@@ -484,7 +487,7 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
                 yAxis: chartConfig.yAxis.value,
                 aggregation: chartConfig.aggregation.value,
                 ...(acctId && { acctId }),
-                ...(categoryId && { categoryId }),
+                ...(collectionId && { collectionId }),
                 ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? { zAxis: chartConfig.zAxis.value } : {}),
             };
 
@@ -729,7 +732,7 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
                 </div>
                 <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                        {chartConfig.chartType?.value === 'pie' ? 'Category' : 'X Axis'}
+                        {chartConfig.chartType?.value === 'pie' ? 'Collection' : 'X Axis'}
                     </label>
                     <Combobox
                         value={chartConfig.xAxis?.value ?? null}
