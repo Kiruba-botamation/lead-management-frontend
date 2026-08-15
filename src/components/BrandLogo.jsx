@@ -5,7 +5,7 @@ import { BRAND_NAME, getBrandLogoSrc } from '../utils/brandAssets';
  * Renders the brand logo image.
  * Falls back to a text-initial avatar if the URL is empty or the image fails to load.
  */
-const BrandLogo = ({ className = 'w-10 h-10 object-contain rounded-lg shadow-lg' }) => {
+const BrandLogo = ({ className = 'w-10 h-10 object-contain rounded-lg shadow-lg bg-white' }) => {
     const src = getBrandLogoSrc();
     const [failed, setFailed] = useState(false);
 
