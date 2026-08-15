@@ -32,13 +32,14 @@
         "build": "vite build",
         "build:production": "vite build --mode production",
         "build:uc": "vite build --mode uc",
+        "build:botamation": "vite build --mode botamation",
         "preview": "vite preview"
     },
     "scriptsInfo": {
         "start": "Loads .env.development",
         "dev": "Loads .env.development",
         "build": "Loads .env.production",
-        "build:uc": "Loads .env.uc",
+        "build:botamation": "Loads .env.botamation",
         "preview": "Loads .env.production (previews build output)"
     }
 }
