@@ -99,7 +99,9 @@ const API_PREDEFINED_FIELDS = [
     { label: 'Name',        field: 'name',        type: 'text',   required: true,  sample: 'Joe Smith' },
     { label: 'Phone',       field: 'phone',       type: 'text',   required: true,  sample: '+1234567890' },
     { label: 'Email',       field: 'email',       type: 'text',   required: false, sample: 'joe@example.com' },
-    { label: 'Responsible', field: 'responsible', type: 'text',   required: false, sample: '{{assigned_admin_id}}' },
+    { label: 'Chatbot Responsible', field: 'chatbotResponsible', type: 'text', required: false, sample: '{{chatbot_admin_id}}' },
+    { label: 'Account Admin ID', field: 'accountAdminId', type: 'text', required: false, sample: '{{account_admin_id}}', omitFromSample: true },
+    { label: 'Responsible', field: 'responsible', type: 'text', required: false, sample: '{{user_id}}', omitFromSample: true },
     { label: 'Stage',       field: 'stage',       type: 'number', required: false, sample: 1 },
 ];
 const API_PREDEFINED_KEYS = new Set(API_PREDEFINED_FIELDS.map(f => f.field));
@@ -200,7 +202,7 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
 
     // Build the example payload in the same order — predefined fields always shown.
     const payloadFields = {};
-    API_PREDEFINED_FIELDS.forEach(f => { payloadFields[f.field] = f.sample; });
+    API_PREDEFINED_FIELDS.filter(f => !f.omitFromSample).forEach(f => { payloadFields[f.field] = f.sample; });
     customFields.forEach(f => { payloadFields[f.field] = dummyValue(f); });
 
     const payloadText = JSON.stringify({ data: payloadFields }, null, 2);
@@ -301,7 +303,45 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
                                 </div>
                                 <p className="mt-1 text-[10px] text-gray-500">
                                     <strong>name</strong> and <strong>phone</strong> are mandatory; all other fields are optional.
-                                    <span className="block">Predefined fields (<code className="bg-gray-100 px-1 rounded font-mono">name, phone, email, responsible, stage</code>) are always accepted.</span>
+                                    <span className="block">Assignee priority: <code className="bg-gray-100 px-1 rounded font-mono">chatbotResponsible</code>, then <code className="bg-gray-100 px-1 rounded font-mono">accountAdminId</code>, then <code className="bg-gray-100 px-1 rounded font-mono">responsible</code> (user ID).</span>
+                                </p>
+                            </Section>
+
+                            {/* Responsible assignment */}
+                            <Section title="Responsible Assignment">
+                                <p className="mb-2 text-[10px] text-gray-500">
+                                    Assign a lead using any one of these admin identifiers. You can copy each value from the Admin dashboard.
+                                </p>
+                                <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                                    <table className="w-full text-[11px]">
+                                        <thead>
+                                            <tr className="bg-gray-100 text-gray-600">
+                                                <th className="px-3 py-1.5 text-left font-semibold">Priority</th>
+                                                <th className="px-3 py-1.5 text-left font-semibold">Parameter</th>
+                                                <th className="px-3 py-1.5 text-left font-semibold">Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            <tr>
+                                                <td className="px-3 py-1.5 font-semibold text-indigo-700">1</td>
+                                                <td className="px-3 py-1.5"><code className="ds-code text-[10px]">chatbotResponsible</code></td>
+                                                <td className="px-3 py-1.5 text-gray-600">Chatbot Admin ID</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="px-3 py-1.5 font-semibold text-gray-600">2</td>
+                                                <td className="px-3 py-1.5"><code className="ds-code text-[10px]">accountAdminId</code></td>
+                                                <td className="px-3 py-1.5 text-gray-600">Admin table ID</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="px-3 py-1.5 font-semibold text-gray-600">3</td>
+                                                <td className="px-3 py-1.5"><code className="ds-code text-[10px]">responsible</code></td>
+                                                <td className="px-3 py-1.5 text-gray-600">Lead-app User ID</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p className="mt-2 text-[10px] text-gray-500">
+                                    If multiple identifiers are sent, the highest-priority parameter is used. Invalid Chatbot or Admin IDs are rejected.
                                 </p>
                             </Section>
 

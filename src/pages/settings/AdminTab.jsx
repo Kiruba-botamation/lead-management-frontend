@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api, { authApi } from '../../api/axiosConfig';
 import Tooltip from '../../components/Tooltip';
+import Button from '../../components/ui/Button';
+import { Dropdown, DropdownItem } from '../../components/ui/Dropdown';
 
 /** Blank profile-edit form. */
 const EMPTY_FORM = { firstName: '', lastName: '', email: '', phone: '', profileImage: '', accessLevel: 'admin' };
@@ -12,7 +14,7 @@ const COLUMNS = [
     { key: 'lastName',       label: 'Last Name',       type: 'text',   filter: 'text', align: 'center' },
     { key: 'email',          label: 'Email',           type: 'text',   filter: 'text', align: 'center' },
     { key: 'phone',          label: 'Phone',           type: 'text',   filter: 'text', align: 'center' },
-    { key: 'chatbotAdminId', label: 'Chatbot Admin ID', type: 'text',  filter: 'text', align: 'center' },
+    { key: 'chatbotAdminId', label: 'Assignment IDs',  type: 'identifiers', filter: 'text', align: 'center' },
     { key: 'accessLevel',    label: 'Access Level',    type: 'badge',  filter: 'select', align: 'center' },
     { key: 'createdAt',      label: 'Created Date',    type: 'date',   filter: null,   align: 'center' },
     { key: 'updatedAt',      label: 'Updated Date',    type: 'date',   filter: null,   align: 'center' },
@@ -30,6 +32,53 @@ const getAvatarColor = (str) => {
 };
 
 const fullName = (a) => [a.firstName || '', a.lastName || ''].filter(Boolean).join(' ') || '-';
+
+const AssignmentIdentifiers = ({ admin, copied, onCopy }) => {
+    const identifiers = [
+        { label: 'Chatbot ID', value: admin.chatbotAdminId },
+        { label: 'Admin ID', value: admin._id },
+        { label: 'User ID', value: admin.userId },
+    ].filter(identifier => identifier.value);
+    const primary = identifiers[0];
+
+    return (
+        <div className="inline-flex items-center gap-2">
+            <code className="max-w-28 truncate ds-code text-[10px] text-gray-700" title={primary?.value || ''}>
+                {primary?.value || '-'}
+            </code>
+            {identifiers.length > 0 && (
+                <Dropdown
+                    align="right"
+                    portal
+                    trigger={(
+                        <Tooltip content={copied ? 'Copied!' : 'Copy assignment ID'} placement="top">
+                            <Button type="button" variant="ghost" size="sm" iconOnly aria-label="Copy an assignment ID">
+                                {copied ? (
+                                    <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                )}
+                            </Button>
+                        </Tooltip>
+                    )}
+                >
+                    {identifiers.map(identifier => (
+                        <DropdownItem key={identifier.label} onClick={() => onCopy(identifier.value)} className="min-w-64">
+                            <span className="flex w-full items-center justify-between gap-4">
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{identifier.label}</span>
+                                <code className="ds-code max-w-40 truncate text-[10px] text-gray-700" title={identifier.value}>{identifier.value}</code>
+                            </span>
+                        </DropdownItem>
+                    ))}
+                </Dropdown>
+            )}
+        </div>
+    );
+};
 
 const ROLE_COLORS = {
     superadmin: { bg: 'bg-indigo-100', text: 'text-indigo-700', dot: 'bg-indigo-500' },
@@ -122,8 +171,19 @@ const AdminTab = ({ acctId }) => {
     const [editForm, setEditForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
     const [authSyncing, setAuthSyncing] = useState(false);
+    const [copiedIdentifier, setCopiedIdentifier] = useState('');
 
     const isSuperadmin = currentAccessLevel === 'superadmin';
+
+    const copyIdentifier = async (value) => {
+        try {
+            await navigator.clipboard.writeText(String(value));
+            setCopiedIdentifier(String(value));
+            setTimeout(() => setCopiedIdentifier(current => current === String(value) ? '' : current), 2000);
+        } catch {
+            setError('Failed to copy the admin identifier.');
+        }
+    };
 
     const loadAdmins = useCallback(async (endpoint, filterParams = {}, sortBy = '', order = 'asc', page = 1, limit = 20) => {
         if (!acctId) return;
@@ -320,6 +380,15 @@ const AdminTab = ({ acctId }) => {
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${isSuper ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
                     {isSuper ? 'Super Admin' : 'Admin'}
                 </span>
+            );
+        }
+        if (col.type === 'identifiers') {
+            return (
+                <AssignmentIdentifiers admin={admin} copied={[
+                    admin.chatbotAdminId,
+                    admin._id,
+                    admin.userId,
+                ].some(value => copiedIdentifier === String(value))} onCopy={copyIdentifier} />
             );
         }
         if (col.type === 'date') {
