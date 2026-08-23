@@ -43,16 +43,19 @@ const AssignmentIdentifiers = ({ admin, copied, onCopy }) => {
 
     return (
         <div className="inline-flex items-center gap-2">
-            <code className="max-w-28 truncate ds-code text-[10px] text-gray-700" title={primary?.value || ''}>
-                {primary?.value || '-'}
-            </code>
+            <div className="flex min-w-0 flex-col text-left">
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">{primary?.label || 'Identifier'}</span>
+                <code className="max-w-28 truncate ds-code text-[10px] text-gray-700" title={primary?.value || ''}>
+                    {primary?.value || '-'}
+                </code>
+            </div>
             {identifiers.length > 0 && (
                 <Dropdown
                     align="right"
                     portal
                     trigger={(
                         <Tooltip content={copied ? 'Copied!' : 'Copy assignment ID'} placement="top">
-                            <Button type="button" variant="ghost" size="sm" iconOnly aria-label="Copy an assignment ID">
+                            <Button type="button" variant="secondary" size="sm" aria-label="Copy an assignment ID">
                                 {copied ? (
                                     <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -62,6 +65,7 @@ const AssignmentIdentifiers = ({ admin, copied, onCopy }) => {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                     </svg>
                                 )}
+                                {copied ? 'Copied' : 'Copy IDs'}
                             </Button>
                         </Tooltip>
                     )}
