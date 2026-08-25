@@ -12,6 +12,8 @@
  */
 
 export const BRAND_NAME = import.meta.env.VITE_BRAND_NAME || 'App';
+export const BRAND_LOGO_TRANSPARENT_BACKGROUND =
+    import.meta.env.VITE_BRAND_LOGO_TRANSPARENT_BACKGROUND === 'true';
 const BRAND_LOGO_URL = import.meta.env.VITE_BRAND_LOGO_URL || '';
 const BRAND_FAVICON_URL = import.meta.env.VITE_BRAND_FAVICON_URL || '';
 

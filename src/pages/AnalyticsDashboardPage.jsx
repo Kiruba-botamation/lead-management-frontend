@@ -228,6 +228,7 @@ const AnalyticsDashboardPage = () => {
         zAxis: null,
         aggregation: null,
         chartMode: null,
+        dateFilterField: 'updatedAt',
         dateFilterFrom: getTodayISO(),
         dateFilterTo: getTodayISO(),
         _datePreset: 'today',
@@ -242,7 +243,7 @@ const AnalyticsDashboardPage = () => {
         dateGranularity: 'day',
         showLegend: true,
         showDataLabels: true,
-        numberSplitCount: 0,
+        numberSplitCount: 'auto',
         fieldLabels: {},
     };
 
@@ -284,6 +285,7 @@ const AnalyticsDashboardPage = () => {
                 xAxis: chart.xAxis,
                 yAxis: chart.yAxis,
                 aggregation: chart.aggregation,
+                dateFilterField: chart.dateFilterField,
                 dateFilterFrom: chart.dateFilterFrom,
                 dateFilterTo: chart.dateFilterTo,
                 _datePreset: chart._datePreset || 'today',
@@ -301,7 +303,7 @@ const AnalyticsDashboardPage = () => {
                 chartMode: chart.chartMode || null,
                 chartCollection: chart.chartCollection || null,
                 fieldLabels: chart.fieldLabels || {},
-                numberSplitCount: chart.numberSplitCount ?? 0,
+                numberSplitCount: chart.numberSplitCount ?? 'auto',
                 dateGranularity: chart.dateGranularity || 'day',
                 showLegend: chart.showLegend ?? true,
                 showDataLabels: chart.showDataLabels ?? true
@@ -372,11 +374,20 @@ const AnalyticsDashboardPage = () => {
         const todayISO = getTodayISO();
         const preset = entry._datePreset || 'today';
         const resolvedDates = resolveDatesForPreset(preset, entry._lastNDays || 7);
+        const legacyDateField = DATE_AXIS_FIELDS.includes(entry.xAxis?.value) ? entry.xAxis.value : 'updatedAt';
+        const dateFilterField = DATE_AXIS_FIELDS.includes(entry.dateFilterField) ? entry.dateFilterField : legacyDateField;
+        const numberSplitCount = entry.numberSplitCount === 'auto'
+            ? 'auto'
+            : Number.isInteger(entry.numberSplitCount) && entry.numberSplitCount >= 0 && entry.numberSplitCount <= 15
+                ? entry.numberSplitCount
+                : 'auto';
         return {
             ...defaultChartConfig,
             ...entry,
             id: entry.id,
             _datePreset: preset,
+            dateFilterField,
+            numberSplitCount,
             // For relative presets, always recompute from today so stale saved dates are never used
             dateFilterFrom: resolvedDates ? resolvedDates.dateFilterFrom : (entry.dateFilterFrom || todayISO),
             dateFilterTo: resolvedDates ? resolvedDates.dateFilterTo : (entry.dateFilterTo || todayISO),
@@ -610,6 +621,7 @@ const AnalyticsDashboardPage = () => {
                     zAxis: null,
                     aggregation: null,
                     chartMode: null,
+                    dateFilterField: 'updatedAt',
                     dateFilterFrom: todayISO,
                     dateFilterTo: todayISO,
                     _datePreset: 'today',
@@ -651,6 +663,7 @@ const AnalyticsDashboardPage = () => {
                 : {}),
             ...(chartConfig.dateFilterFrom ? { dateFrom: chartConfig.dateFilterFrom } : {}),
             ...(chartConfig.dateFilterTo ? { dateTo: chartConfig.dateFilterTo } : {}),
+            dateFilterField: chartConfig.dateFilterField || (isDateAxis ? xAxisField : 'updatedAt'),
             ...(isDateAxis ? { dateGranularity: chartConfig.dateGranularity || 'day' } : {})
         };
 
@@ -701,6 +714,7 @@ const AnalyticsDashboardPage = () => {
                         zAxis: null,
                         aggregation: null,
                         chartMode: null,
+                        dateFilterField: 'updatedAt',
                         dateFilterFrom: todayISO,
                         dateFilterTo: todayISO,
                         _datePreset: 'today',
@@ -758,6 +772,7 @@ const AnalyticsDashboardPage = () => {
                 ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? { zAxis: chartConfig.zAxis.value } : {}),
                 ...(chartConfig.dateFilterFrom && { dateFrom: chartConfig.dateFilterFrom }),
                 ...(chartConfig.dateFilterTo && { dateTo: chartConfig.dateFilterTo }),
+                dateFilterField: chartConfig.dateFilterField || (isDateAxis ? xAxisValue : 'updatedAt'),
                 ...(isDateAxis ? { dateGranularity: chartConfig.dateGranularity || 'day' } : {}),
                 ...(viewingAsRef.current && { viewingAs: viewingAsRef.current })
             };
@@ -1644,11 +1659,11 @@ const AnalyticsDashboardPage = () => {
         return chartDataCache[chartId] || [];
     };
 
-    // Colors for charts - Vibrant palette
+    // High-contrast palette ordered to keep adjacent series visually distinct.
     const COLORS = [
-        '#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6',
-        '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4',
-        '#84cc16', '#a855f7', '#22c55e', '#eab308', '#ef4444'
+        '#5b5ff0', '#f43f5e', '#00a982', '#f59e0b', '#0ea5e9',
+        '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#2563eb',
+        '#84cc16', '#c026d3', '#16a34a', '#eab308', '#ef4444'
     ];
 
     // Shared modern legend renderer — pill chips with color swatch
@@ -1721,12 +1736,13 @@ const AnalyticsDashboardPage = () => {
     // Shared attractive tooltip style
     const tooltipStyle = {
         contentStyle: {
-            backgroundColor: 'rgba(255,255,255,0.98)',
-            border: 'none',
-            borderRadius: '16px',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-            padding: '12px 16px',
-            fontSize: '13px'
+            backgroundColor: 'rgba(255,255,255,0.94)',
+            border: '1px solid rgba(99,102,241,0.16)',
+            borderRadius: '14px',
+            boxShadow: '0 18px 45px rgba(30,41,59,0.16), 0 4px 14px rgba(99,102,241,0.1)',
+            backdropFilter: 'blur(12px)',
+            padding: '11px 14px',
+            fontSize: '12px'
         },
         labelStyle: { color: '#1e293b', fontWeight: 700, marginBottom: 4 },
         itemStyle: { color: '#64748b' },
@@ -1813,10 +1829,11 @@ const AnalyticsDashboardPage = () => {
                         <PieChart margin={{ top: 35, right: 80, bottom: 35, left: 80 }}>
                             <defs>
                                 {COLORS.map((color, i) => (
-                                    <radialGradient key={i} id={`pieGrad-${i}`} cx="50%" cy="50%" r="50%">
-                                        <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                        <stop offset="100%" stopColor={color} stopOpacity={0.75} />
-                                    </radialGradient>
+                                    <linearGradient key={i} id={`pieGrad-${i}`} x1="0" y1="0" x2="1" y2="1">
+                                        <stop offset="0%" stopColor={color} stopOpacity={0.78} />
+                                        <stop offset="48%" stopColor={color} stopOpacity={1} />
+                                        <stop offset="100%" stopColor={color} stopOpacity={0.88} />
+                                    </linearGradient>
                                 ))}
                             </defs>
                             <Pie
@@ -1837,10 +1854,17 @@ const AnalyticsDashboardPage = () => {
                                         key={`cell-${index}`}
                                         fill={`url(#pieGrad-${index % COLORS.length})`}
                                         stroke="white"
-                                        strokeWidth={2}
+                                        strokeWidth={3}
+                                        style={{ filter: `drop-shadow(0 5px 8px ${COLORS[index % COLORS.length]}35)` }}
                                     />
                                 ))}
                             </Pie>
+                            <text x="50%" y="47%" textAnchor="middle" dominantBaseline="middle" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1.2">
+                                TOTAL
+                            </text>
+                            <text x="50%" y="54%" textAnchor="middle" dominantBaseline="middle" fill="#0f172a" fontSize="20" fontWeight="800">
+                                {total.toLocaleString()}
+                            </text>
                             <Tooltip
                                 contentStyle={tooltipStyle.contentStyle}
                                 labelStyle={tooltipStyle.labelStyle}
@@ -1911,12 +1935,13 @@ const AnalyticsDashboardPage = () => {
                             <defs>
                                 {COLORS.map((color, i) => (
                                     <linearGradient key={i} id={`barGrad-${i}`} x1="0" y1="0" x2={isHorizontal ? '1' : '0'} y2={isHorizontal ? '0' : '1'}>
-                                        <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                        <stop offset="100%" stopColor={color} stopOpacity={0.45} />
+                                        <stop offset="0%" stopColor={color} stopOpacity={0.82} />
+                                        <stop offset="42%" stopColor={color} stopOpacity={1} />
+                                        <stop offset="100%" stopColor={color} stopOpacity={0.88} />
                                     </linearGradient>
                                 ))}
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={!isHorizontal} vertical={isHorizontal} />
+                            <CartesianGrid strokeDasharray="4 6" stroke="#e8eafc" horizontal={!isHorizontal} vertical={isHorizontal} />
                             {isHorizontal ? (
                                 <>
                                     <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -1939,12 +1964,17 @@ const AnalyticsDashboardPage = () => {
                             <Bar
                                 dataKey="value"
                                 name={lbl(yAxisLabel)}
-                                radius={isHorizontal ? [0, 8, 8, 0] : [8, 8, 0, 0]}
+                                radius={isHorizontal ? [0, 12, 12, 0] : [12, 12, 4, 4]}
                                 maxBarSize={60}
                                 isAnimationActive={false}
+                                background={{ fill: 'rgba(99,102,241,0.045)', radius: 12 }}
                             >
                                 {chartData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={`url(#barGrad-${index % COLORS.length})`} />
+                                    <Cell
+                                        key={`cell-${index}`}
+                                        fill={`url(#barGrad-${index % COLORS.length})`}
+                                        style={{ filter: `drop-shadow(0 5px 7px ${COLORS[index % COLORS.length]}28)` }}
+                                    />
                                 ))}
                                 {showDataLabels && (
                                     <LabelList
@@ -1971,11 +2001,12 @@ const AnalyticsDashboardPage = () => {
                     <AreaChart data={chartData} margin={{ top: showDataLabels ? 22 : 10, right: 20, left: 10, bottom: 40 }}>
                         <defs>
                             <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                                <stop offset="95%" stopColor={color} stopOpacity={0} />
+                                <stop offset="0%" stopColor={color} stopOpacity={0.48} />
+                                <stop offset="50%" stopColor={color} stopOpacity={0.18} />
+                                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <CartesianGrid strokeDasharray="4 6" stroke="#e8eafc" vertical={false} />
                         <XAxis
                             dataKey="name"
                             tick={{ fill: '#64748b', fontSize: 11 }}
@@ -2004,10 +2035,11 @@ const AnalyticsDashboardPage = () => {
                             dataKey="value"
                             name={lbl(yAxisLabel)}
                             stroke={color}
-                            strokeWidth={3}
+                            strokeWidth={4}
                             fill="url(#areaGrad)"
-                            dot={{ fill: color, stroke: 'white', strokeWidth: 2, r: 5 }}
-                            activeDot={{ r: 7, fill: color, stroke: 'white', strokeWidth: 2 }}
+                            dot={{ fill: color, stroke: 'white', strokeWidth: 3, r: 5 }}
+                            activeDot={{ r: 8, fill: color, stroke: 'white', strokeWidth: 3 }}
+                            style={{ filter: `drop-shadow(0 5px 7px ${color}35)` }}
                             isAnimationActive={false}
                         >
                             {showDataLabels && (
@@ -2047,7 +2079,7 @@ const AnalyticsDashboardPage = () => {
                 <div style={{ flex: 1, minHeight: 0 }}>
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data} margin={{ top: showDataLabels ? 22 : 10, right: 20, left: 10, bottom: 40 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                            <CartesianGrid strokeDasharray="4 6" stroke="#e8eafc" vertical={false} />
                             <XAxis
                                 dataKey="name"
                                 tick={{ fill: '#64748b', fontSize: 11 }}
@@ -2074,9 +2106,10 @@ const AnalyticsDashboardPage = () => {
                                     dataKey={zKey}
                                     name={lbl(zKey)}
                                     stroke={COLORS[i % COLORS.length]}
-                                    strokeWidth={2.5}
+                                    strokeWidth={3.5}
                                     dot={{ fill: COLORS[i % COLORS.length], stroke: 'white', strokeWidth: 2, r: 4 }}
                                     activeDot={{ r: 6, stroke: 'white', strokeWidth: 2 }}
+                                    style={{ filter: `drop-shadow(0 4px 6px ${COLORS[i % COLORS.length]}30)` }}
                                     isAnimationActive={false}
                                 >
                                     {showDataLabels && (
@@ -2124,7 +2157,11 @@ const AnalyticsDashboardPage = () => {
                             <div
                                 key={index}
                                 title={`${entry.name}: ${entry.value.toLocaleString()} ${yAxisLabel}`}
-                                style={{ backgroundColor: `rgba(${r},${g},${b},${0.1 + intensity * 0.9})` }}
+                                style={{
+                                    background: `linear-gradient(145deg, rgba(${r},${g},${b},${0.18 + intensity * 0.72}), rgba(${r},${g},${b},${0.08 + intensity * 0.82}))`,
+                                    border: `1px solid rgba(${r},${g},${b},${0.2 + intensity * 0.35})`,
+                                    boxShadow: `0 8px 18px rgba(${r},${g},${b},${0.08 + intensity * 0.16})`,
+                                }}
                                 className="flex flex-col items-center justify-center rounded-xl p-3 min-w-[72px] cursor-default transition-transform duration-150 hover:scale-110 hover:shadow-md"
                             >
                                 <span className="text-sm font-black leading-none" style={{ color: intensity > 0.55 ? 'white' : '#1e293b' }}>
@@ -2142,22 +2179,27 @@ const AnalyticsDashboardPage = () => {
     };
 
     // Render Number Chart — large KPI total with top-N breakdown
-    const renderNumberChart = (chartData, yAxisLabel, color = DEFAULT_CHART_COLOR, splitCount = 4) => {
+    const renderNumberChart = (chartData, yAxisLabel, color = DEFAULT_CHART_COLOR, splitCount = 'auto') => {
         const total = chartData.reduce((sum, d) => sum + (d.value || 0), 0);
         const fmt = (n) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : n.toLocaleString();
-        const topItems = splitCount > 0 ? [...chartData].sort((a, b) => b.value - a.value).slice(0, splitCount) : [];
+        const resolvedSplitCount = splitCount === 'auto'
+            ? Math.min(chartData.length, 15)
+            : Math.min(Math.max(Number(splitCount) || 0, 0), 15);
+        const topItems = resolvedSplitCount > 0
+            ? [...chartData].sort((a, b) => b.value - a.value).slice(0, resolvedSplitCount)
+            : [];
         return (
             <div className="w-full h-full flex flex-col items-center justify-center gap-4 p-6">
                 <div className="text-center">
-                    <div className="text-7xl font-black tracking-tighter leading-none" style={{ color }}>
+                    <div className="text-7xl font-black tracking-tighter leading-none" style={{ color, textShadow: `0 10px 28px ${color}30` }}>
                         {fmt(total)}
                     </div>
                     <div className="text-sm text-gray-500 mt-3 font-medium uppercase tracking-widest">{yAxisLabel}</div>
                 </div>
-                {topItems.length > 1 && (
+                {topItems.length > 0 && (
                     <div className="flex flex-wrap justify-center gap-3 mt-2">
                         {topItems.map((item, i) => (
-                            <div key={i} className="text-center rounded-xl px-4 py-2 border min-w-[80px]" style={{ backgroundColor: `${color}10`, borderColor: `${color}30` }}>
+                            <div key={i} className="text-center rounded-xl px-4 py-2 border min-w-[80px]" style={{ background: `linear-gradient(145deg, ${color}18, ${color}08)`, borderColor: `${color}35`, boxShadow: `0 8px 20px ${color}12` }}>
                                 <div className="text-lg font-bold" style={{ color }}>{item.value.toLocaleString()}</div>
                                 <div className="text-[11px] text-gray-500 truncate max-w-[100px]">{item.name}</div>
                             </div>
@@ -2199,12 +2241,13 @@ const AnalyticsDashboardPage = () => {
                             <defs>
                                 {COLORS.map((color, i) => (
                                     <linearGradient key={i} id={`msBarGrad-${i}`} x1="0" y1="0" x2={isHorizontal ? '1' : '0'} y2={isHorizontal ? '0' : '1'}>
-                                        <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                        <stop offset="100%" stopColor={color} stopOpacity={0.5} />
+                                        <stop offset="0%" stopColor={color} stopOpacity={0.82} />
+                                        <stop offset="45%" stopColor={color} stopOpacity={1} />
+                                        <stop offset="100%" stopColor={color} stopOpacity={0.88} />
                                     </linearGradient>
                                 ))}
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={!isHorizontal} vertical={isHorizontal} />
+                            <CartesianGrid strokeDasharray="4 6" stroke="#e8eafc" horizontal={!isHorizontal} vertical={isHorizontal} />
                             {isHorizontal ? (
                                 <>
                                     <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -2237,6 +2280,8 @@ const AnalyticsDashboardPage = () => {
                                     }
                                     maxBarSize={stacked ? 80 : 50}
                                     isAnimationActive={false}
+                                    style={{ filter: `drop-shadow(0 5px 7px ${COLORS[i % COLORS.length]}26)` }}
+                                    background={!stacked ? { fill: 'rgba(99,102,241,0.04)', radius: 10 } : undefined}
                                 >
                                     {showDataLabels && (
                                         <LabelList
@@ -2278,19 +2323,21 @@ const AnalyticsDashboardPage = () => {
                             <defs>
                                 {COLORS.map((color, i) => (
                                     <radialGradient key={i} id={`nPieIn-${i}`} cx="50%" cy="50%" r="50%">
-                                        <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                        <stop offset="100%" stopColor={color} stopOpacity={0.75} />
+                                        <stop offset="0%" stopColor={color} stopOpacity={0.78} />
+                                        <stop offset="50%" stopColor={color} stopOpacity={1} />
+                                        <stop offset="100%" stopColor={color} stopOpacity={0.86} />
                                     </radialGradient>
                                 ))}
                                 {COLORS.map((color, i) => (
                                     <radialGradient key={`o${i}`} id={`nPieOut-${i}`} cx="50%" cy="50%" r="50%">
-                                        <stop offset="0%" stopColor={color} stopOpacity={0.85} />
-                                        <stop offset="100%" stopColor={color} stopOpacity={0.5} />
+                                        <stop offset="0%" stopColor={color} stopOpacity={0.7} />
+                                        <stop offset="50%" stopColor={color} stopOpacity={0.92} />
+                                        <stop offset="100%" stopColor={color} stopOpacity={0.76} />
                                     </radialGradient>
                                 ))}
                             </defs>
                             <Pie data={innerData} cx="50%" cy="50%" innerRadius={40} outerRadius={72} paddingAngle={2} dataKey="value" isAnimationActive={false}>
-                                {innerData.map((_, i) => <Cell key={`in-${i}`} fill={`url(#nPieIn-${i % COLORS.length})`} stroke="white" strokeWidth={2} />)}
+                                {innerData.map((_, i) => <Cell key={`in-${i}`} fill={`url(#nPieIn-${i % COLORS.length})`} stroke="white" strokeWidth={2} style={{ filter: `drop-shadow(0 4px 7px ${COLORS[i % COLORS.length]}30)` }} />)}
                             </Pie>
                             <Pie data={outerData} cx="50%" cy="50%" innerRadius={78} outerRadius={115} paddingAngle={1} dataKey="value" isAnimationActive={false}>
                                 {outerData.map((_, i) => <Cell key={`out-${i}`} fill={`url(#nPieOut-${i % COLORS.length})`} stroke="white" strokeWidth={1} />)}
@@ -2300,7 +2347,8 @@ const AnalyticsDashboardPage = () => {
                                 labelStyle={tooltipStyle.labelStyle}
                                 itemStyle={tooltipStyle.itemStyle}
                                 formatter={(value, name) => {
-                                    const total = outerData.find(d => d.name === name) ? totalOuter : totalInner;
+                                    const total = outerData.reduce((sum, item) => sum + item.value, 0) || totalInner;
+                                    const pct = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
                                     return [`${value.toLocaleString()} (${pct}%)`, lbl(name)];
                                 }}
                             />
@@ -2342,14 +2390,16 @@ const AnalyticsDashboardPage = () => {
     };
 
     const renderChart = (chartConfig) => {
-        const isLoading = chartLoadingState[chartConfig.id];
+        const hasCompletedFetch = Object.prototype.hasOwnProperty.call(chartDataCache, chartConfig.id);
+        const isLoading = chartLoadingState[chartConfig.id] === true
+            || (isChartConfigured(chartConfig) && !hasCompletedFetch);
         const chartData = getChartData(chartConfig, chartConfig.id);
         const yAxisLabel = chartConfig.yAxis?.label || 'Value';
         const height = chartConfig.chartHeight || 320;
         const isDateXAxis = DATE_AXIS_FIELDS.includes(chartConfig.xAxis?.value);
 
         if (isLoading) return (
-            <div className="flex flex-col items-center justify-center w-full h-full gap-2">
+            <div className="flex flex-col items-center justify-center w-full h-full gap-2" role="status" aria-live="polite">
                 <div className="relative">
                     <div className="animate-spin rounded-full h-7 w-7 border-2 border-gray-200"></div>
                     <div className="animate-spin rounded-full h-7 w-7 border-2 border-indigo-600 border-t-transparent absolute top-0"></div>
@@ -2370,7 +2420,7 @@ const AnalyticsDashboardPage = () => {
         const showDataLabels = chartConfig.showDataLabels !== false;
         const fieldLabels = chartConfig.fieldLabels || {};
         const lbl = (key) => fieldLabels[key] || key;
-        const splitCount = chartConfig.numberSplitCount ?? 0;
+        const splitCount = chartConfig.numberSplitCount ?? 'auto';
         // Apply field label override to yAxisLabel for all chart types
         const displayYLabel = fieldLabels[chartConfig.yAxis?.value] || yAxisLabel;
         switch (chartConfig.chartType.value) {
@@ -2553,9 +2603,15 @@ const AnalyticsDashboardPage = () => {
             { value: 'last_n', label: 'Last N Days' },
             { value: 'custom', label: 'Custom' },
         ];
+        const DATE_FILTER_FIELD_OPTIONS = [
+            { value: 'createdAt', label: 'Created At' },
+            { value: 'updatedAt', label: 'Updated At' },
+        ];
 
         const activePreset = mergedConfig._datePreset || 'today';
         const activePresetOption = DATE_PRESET_OPTIONS.find(o => o.value === activePreset) || DATE_PRESET_OPTIONS[0];
+        const activeDateFilterField = DATE_FILTER_FIELD_OPTIONS.find(o => o.value === mergedConfig.dateFilterField)
+            || DATE_FILTER_FIELD_OPTIONS[1];
         const showCustomInputs = activePreset === 'custom';
         const showLastNInput = activePreset === 'last_n';
         const filterIsVisible = !!filterVisible[chartConfig.id];
@@ -2868,6 +2924,7 @@ const AnalyticsDashboardPage = () => {
                                             zAxis: null,
                                             aggregation: null,
                                             chartMode: null,
+                                            dateFilterField: 'updatedAt',
                                             dateFilterFrom: todayISO,
                                             dateFilterTo: todayISO,
                                             _datePreset: 'today',
@@ -2940,6 +2997,14 @@ const AnalyticsDashboardPage = () => {
                                 {/* ── Date filter row ── */}
                                 <div className="flex items-center gap-2 pt-3 mb-3 px-5 flex-wrap">
                                     <span className="text-xs font-semibold text-gray-700 shrink-0">Filter:</span>
+                                    <div className="w-32">
+                                        <Combobox
+                                            value={activeDateFilterField.value}
+                                            onChange={(val) => val && updatePendingConfig(chartConfig.id, 'dateFilterField', val)}
+                                            options={DATE_FILTER_FIELD_OPTIONS}
+                                            dropdownClassName="!z-[500] !min-w-[150px]"
+                                        />
+                                    </div>
                                     <div className="w-32 [&_input]:!py-0.5 [&_input]:!text-[11px] [&_input]:!pl-2 [&_input]:!pr-7 [&_svg]:!size-3">
                                         <Combobox
                                             value={activePresetOption?.value ?? null}
@@ -3107,9 +3172,9 @@ const AnalyticsDashboardPage = () => {
                                                 <div className="flex items-center gap-1.5 shrink-0">
                                                     <span className="text-[11px] font-semibold text-gray-600 shrink-0">Split</span>
                                                     <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden text-[11px] font-semibold">
-                                                        {[{ v: 0, label: 'None' }, ...Array.from({ length: 10 }, (_, i) => ({ v: i + 1, label: String(i + 1) }))].map(({ v, label }) => (
+                                                        {[{ v: 'auto', label: 'Auto' }, { v: 0, label: 'None' }, ...Array.from({ length: 10 }, (_, i) => ({ v: i + 1, label: String(i + 1) }))].map(({ v, label }) => (
                                                             <button key={label} onClick={() => updatePendingConfig(chartConfig.id, 'numberSplitCount', v)}
-                                                                className={`px-2 py-0.5 transition-all ${(mergedConfig.numberSplitCount ?? 4) === v ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-indigo-50 hover:text-indigo-600'}`}>
+                                                                className={`px-2 py-0.5 transition-all ${(mergedConfig.numberSplitCount ?? 'auto') === v ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-indigo-50 hover:text-indigo-600'}`}>
                                                                 {label}
                                                             </button>
                                                         ))}
@@ -3265,7 +3330,8 @@ const AnalyticsDashboardPage = () => {
                 {/* Chart Display — fills remaining space */}
                 <div
                     data-pdf-content="true"
-                    className="relative bg-gray-50 border-t-2 border-gray-100 flex-1 min-h-0 overflow-hidden"
+                    className="relative border-t border-indigo-100 flex-1 min-h-0 overflow-hidden"
+                    style={{ background: 'radial-gradient(circle at 10% 0%, var(--color-primary-50), transparent 38%), radial-gradient(circle at 100% 100%, var(--color-secondary-50), transparent 34%), var(--color-surface)' }}
                 >
                     <div className="w-full h-full p-4">
                         {renderChart(chartConfig)}

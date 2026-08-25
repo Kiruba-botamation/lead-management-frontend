@@ -35,7 +35,7 @@ function AppRoutes() {
                     path="/leads"
                     element={
                         <ProtectedRoute>
-                            <div className="min-h-screen bg-gray-100">
+                            <div className="h-[100dvh] overflow-hidden bg-gray-100">
                                 <LeadsGrid />
                             </div>
                         </ProtectedRoute>

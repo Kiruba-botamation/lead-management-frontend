@@ -1828,12 +1828,12 @@ const LeadsGrid = () => {
 
     // ── Render ────────────────────────────────────────────────────────────────
     return (
-        <div className="h-[100dvh] w-[100dvw] flex flex-col bg-gray-50 overflow-hidden relative">
+        <div className="h-full w-full min-w-0 flex flex-col bg-gray-50 overflow-hidden relative">
             <LoadingMask loading={isExporting} title="Exporting..." message="Please wait while we export your leads to Excel" />
             <NotificationComponent />
             <AppNavbar activePage="leads" firedCount={firedCount} setFiredCount={setFiredCount} />
 
-            <div className="flex-1 overflow-hidden flex flex-col px-3 sm:px-4 py-3 relative">
+            <div className="flex-1 min-w-0 overflow-hidden flex flex-col px-3 sm:px-4 py-3 relative">
 
                 {/* No account linked */}
                 {accountsLoaded && !accountsLoading && !isAccountLinked && (
@@ -1852,7 +1852,7 @@ const LeadsGrid = () => {
                 )}
 
                 {isAccountLinked && (
-                    <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
+                    <div className="flex-1 min-w-0 flex flex-col min-h-0 animate-fade-in">
 
                         {/* ── Toolbar ─────────────────────────────────────────── */}
                         <div className="mb-3 flex-shrink-0 flex items-center justify-start gap-1 flex-wrap">
@@ -2092,11 +2092,11 @@ const LeadsGrid = () => {
                         </div>
 
                         {/* ── Split panel: Table + Edit form ──────────────── */}
-                        <div className="flex flex-col sm:flex-row gap-4 transition-all duration-300 flex-1 min-h-0 w-full" style={{ alignItems: 'stretch' }}>
+                        <div className="flex flex-col sm:flex-row gap-4 transition-all duration-300 flex-1 min-h-0 min-w-0 w-full" style={{ alignItems: 'stretch' }}>
 
                             {/* LEFT — Table (grid) or Kanban board, crossfaded */}
                             {isGridVisible && (
-                                <div className={`transition-all duration-300 flex flex-col min-h-0 ${(isEditFormVisible || activityLead) ? 'w-full sm:w-[calc(66.666%-0.5rem)]' : 'w-full'}`}>
+                                <div className={`transition-all duration-300 flex flex-col min-h-0 min-w-0 ${(isEditFormVisible || activityLead) ? 'w-full sm:w-[calc(66.666%-0.5rem)]' : 'w-full'}`}>
                                   {/* GRID layer — kept mounted; toggled with the Kanban layer */}
                                   <div className={`${viewMode === 'grid' ? 'flex view-enter-grid' : 'hidden'} flex-col flex-1 min-h-0`}>
                                     <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white rounded-lg shadow-2xl border border-gray-200">

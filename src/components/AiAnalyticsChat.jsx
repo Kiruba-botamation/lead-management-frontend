@@ -704,8 +704,14 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, collections = [], currentCha
                 chartType: c.chartType,
                 xAxis: c.xAxis,
                 yAxis: c.yAxis,
+                zAxis: c.zAxis,
                 aggregation: c.aggregation,
+                chartMode: c.chartMode,
                 _datePreset: c._datePreset,
+                _lastNDays: c._lastNDays,
+                dateFilterFrom: c.dateFilterFrom,
+                dateFilterTo: c.dateFilterTo,
+                dateFilterField: c.dateFilterField,
                 chartCollection: c.chartCollection,
                 chartWidth: c.chartWidth,
                 chartHeight: c.chartHeight,
@@ -713,6 +719,7 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, collections = [], currentCha
                 showDataLabels: c.showDataLabels,
                 barOrientation: c.barOrientation,
                 dateGranularity: c.dateGranularity,
+                numberSplitCount: c.numberSplitCount,
             }));
 
             // Client-side edit intent detection — inject a hint so Gemini sets editChartId correctly
