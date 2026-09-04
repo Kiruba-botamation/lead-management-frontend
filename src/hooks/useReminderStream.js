@@ -32,14 +32,14 @@ export const useReminderStream = ({ showReminder, onNewFired, acctId, userId }) 
 
     // ── Fetch initial unread count (bell badge on mount) ─────────────────────
     const fetchFiredCount = useCallback(async () => {
-        if (!userId) return;
+        if (!acctId || !userId) return;
         try {
-            const res = await remindersApi.getFired(1, 10);
+            const res = await remindersApi.getFired(acctId, 1, 1, true);
             setFiredCount(res.data?.count ?? 0);
         } catch {
             // Non-fatal — badge just won't show a count
         }
-    }, [userId]);
+    }, [acctId, userId]);
 
     // ── SSE connection ────────────────────────────────────────────────────────
     const connectSSE = useCallback(() => {
@@ -72,11 +72,11 @@ export const useReminderStream = ({ showReminder, onNewFired, acctId, userId }) 
                     () => navigate(`/leads?openLead=${payload.leadId}&tab=reminders`)
                 );
 
-                // Increment bell badge
-                setFiredCount(prev => prev + 1);
+                // Pre-reminders show a toast but do not enter the main reminder inbox.
+                if (payload.type === 'main') setFiredCount(prev => prev + 1);
                 // Mild audio cue (respects the user's mute / mood preference)
                 playNotificationSound();
-                onNewFired?.();
+                if (payload.type === 'main') onNewFired?.();
             } catch {
                 // Malformed event — ignore
             }

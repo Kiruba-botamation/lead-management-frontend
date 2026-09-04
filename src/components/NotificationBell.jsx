@@ -9,8 +9,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate }  from 'react-router-dom';
 import { remindersApi } from '../api/remindersApi';
-import api from '../api/axiosConfig';
-import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 import {
     SOUND_MOODS,
@@ -33,12 +31,12 @@ function formatScheduledAt(dateStr) {
 
 export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const navigate     = useNavigate();
-    const { adminId = '' } = useAuth();
     const { acctId = '' } = useAccount();
     const [isOpen,     setIsOpen]     = useState(false);
     const [reminders,  setReminders]  = useState([]);
     const [loading,    setLoading]    = useState(false);
     const [loadingMore,setLoadingMore]= useState(false);
+    const [loadError,  setLoadError]  = useState(false);
     const [page,       setPage]       = useState(1);
     const [hasMore,    setHasMore]    = useState(false);
     const [soundSettings, setSoundSettings] = useState(getSoundSettings);
@@ -62,8 +60,6 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
 
     const unreadCount = reminders.filter(r => !r.notificationRead).length;
 
-    useEffect(() => { setFiredCount?.(unreadCount); }, [unreadCount]); // eslint-disable-line
-
     // Close on outside click
     useEffect(() => {
         if (!isOpen) return;
@@ -76,7 +72,7 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
 
     // Fetch page 1
     const fetchFirst = useCallback(async () => {
-        if (!adminId || firstLoadingRef.current) return;
+        if (!acctId || firstLoadingRef.current) return;
         requestRef.current.firstController?.abort();
         requestRef.current.moreController?.abort();
         const controller = new AbortController();
@@ -85,25 +81,28 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         firstLoadingRef.current = true;
         moreLoadingRef.current = false;
         setLoading(true);
+        setLoadError(false);
         try {
-            const res = await api.get('/api/ui/reminders/fired', {
-                params: { page: 1, limit: PAGE_SIZE, adminId },
+            const res = await remindersApi.getFired(acctId, 1, PAGE_SIZE, true, {
                 signal: controller.signal,
             });
             if (generation !== requestRef.current.generation) return;
             setReminders(res.data?.data || []);
+            setFiredCount?.(res.data?.count ?? 0);
             setHasMore(res.data?.hasMore || false);
             setPage(1);
-        } catch { /* non-fatal */ }
+        } catch (error) {
+            if (generation === requestRef.current.generation && error?.code !== 'ERR_CANCELED') setLoadError(true);
+        }
         finally {
             if (generation === requestRef.current.generation) setLoading(false);
             firstLoadingRef.current = false;
         }
-    }, [adminId]);
+    }, [acctId, setFiredCount]);
 
     // Fetch next page and append
     const fetchMore = useCallback(async () => {
-        if (moreLoadingRef.current || loadingMore || !hasMore || !adminId) return;
+        if (moreLoadingRef.current || loadingMore || !hasMore || !acctId) return;
         const generation = requestRef.current.generation;
         const controller = new AbortController();
         requestRef.current.moreController = controller;
@@ -111,8 +110,7 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         setLoadingMore(true);
         try {
             const nextPage = page + 1;
-            const res = await api.get('/api/ui/reminders/fired', {
-                params: { page: nextPage, limit: PAGE_SIZE, adminId },
+            const res = await remindersApi.getFired(acctId, nextPage, PAGE_SIZE, false, {
                 signal: controller.signal,
             });
             if (generation !== requestRef.current.generation) return;
@@ -125,7 +123,7 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
             if (generation === requestRef.current.generation) setLoadingMore(false);
             moreLoadingRef.current = false;
         }
-    }, [page, hasMore, loadingMore, adminId]);
+    }, [page, hasMore, loadingMore, acctId]);
 
     useEffect(() => {
         requestRef.current.firstController?.abort();
@@ -138,8 +136,9 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         setHasMore(false);
         setLoading(false);
         setLoadingMore(false);
+        setLoadError(false);
         setIsOpen(false);
-    }, [acctId, adminId]);
+    }, [acctId]);
 
     useEffect(() => () => {
         requestRef.current.generation += 1;
@@ -163,7 +162,11 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
         navigate(`/leads?openLead=${rem.leadId}&tab=reminders`);
         if (!rem.notificationRead) {
             setReminders(prev => prev.map(r => r._id === rem._id ? { ...r, notificationRead: true } : r));
-            try { await remindersApi.markRead([rem._id], adminId); } catch { /* non-fatal */ }
+            setFiredCount?.(prev => Math.max(0, prev - 1));
+            try { await remindersApi.markRead([rem._id], acctId); } catch {
+                setReminders(prev => prev.map(r => r._id === rem._id ? { ...r, notificationRead: false } : r));
+                setFiredCount?.(prev => prev + 1);
+            }
         }
     };
 
@@ -171,18 +174,25 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const handleDismiss = async (e, rem) => {
         e.stopPropagation();
         setReminders(prev => prev.filter(r => r._id !== rem._id));
-        try { await remindersApi.dismissFired(rem._id, adminId); } catch {
+        if (!rem.notificationRead) setFiredCount?.(prev => Math.max(0, prev - 1));
+        try { await remindersApi.dismissFired(rem._id, acctId); } catch {
             setReminders(prev => [rem, ...prev]);
+            if (!rem.notificationRead) setFiredCount?.(prev => prev + 1);
         }
     };
 
     // Clear all
     const handleClearAll = async () => {
         const snapshot = reminders;
+        const clearedUnread = snapshot.filter(reminder => !reminder.notificationRead).length;
         setReminders([]);
         setHasMore(false);
-        try { await Promise.all(snapshot.map(r => remindersApi.dismissFired(r._id, adminId))); }
-        catch { setReminders(snapshot); }
+        setFiredCount?.(prev => Math.max(0, prev - clearedUnread));
+        try { await Promise.all(snapshot.map(r => remindersApi.dismissFired(r._id, acctId))); }
+        catch {
+            setReminders(snapshot);
+            setFiredCount?.(prev => prev + clearedUnread);
+        }
     };
 
     return (
@@ -245,13 +255,13 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
                             Reminders
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            {unreadCount > 0 && (
+                            {firedCount > 0 && (
                                 <span style={{
                                     fontSize: '9px', fontWeight: 700,
                                     color: '#6d28d9', background: '#ede9fe',
                                     borderRadius: '9999px', padding: '1px 7px',
                                 }}>
-                                    {unreadCount} unread
+                                    {firedCount > 99 ? '99+' : firedCount} unread
                                 </span>
                             )}
                             {/* Sound settings toggle */}
@@ -360,6 +370,13 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
                         {loading ? (
                             <div style={{ display: 'flex', justifyContent: 'center', padding: '1.5rem' }}>
                                 <div className="animate-spin rounded-full h-5 w-5 border-2 border-violet-500 border-t-transparent" />
+                            </div>
+                        ) : loadError ? (
+                            <div style={{ padding: 'var(--space-6) var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
+                                Could not load reminders.
+                                <button onClick={fetchFirst} style={{ display: 'block', margin: '8px auto 0', color: '#6d28d9', background: 'none', border: 0, cursor: 'pointer', fontWeight: 600 }}>
+                                    Retry
+                                </button>
                             </div>
                         ) : reminders.length === 0 ? (
                             <div style={{ padding: 'var(--space-6) var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
