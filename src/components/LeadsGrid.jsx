@@ -29,7 +29,6 @@ import { Dropdown, DropdownItem } from './ui/Dropdown';
 import { activityApi } from '../api/notesApi';
 import { twoLetterColor, adminDisplayName, tint, ResponsibleSelect, StageSelect } from './leads/leadShared';
 import LeadsKanban from './leads/LeadsKanban';
-import { normalizeListResponse } from './leads/pagination';
 import {
     DndContext,
     DragOverlay,
@@ -1021,13 +1020,13 @@ const CollectionSelectDropdown = ({ collections, value, onChange, onCreate, disa
 const LeadsGrid = () => {
     const navigate                             = useNavigate();
     const location                             = useLocation();
-    const { showSuccess, showError, showWarning, showReminder, NotificationComponent } = useNotifications();
+    const { showSuccess, showError, showWarning, showReminder } = useNotifications();
     const { acctNo, acctId, isAccountLinked, accountsLoaded, accountsLoading, setIsLinkDialogOpen } = useAccount();
     const { userDetails, chatbotAdmin, user: rawUser, accessLevel } = useAuth();
 
     // ── Current user identity ─────────────────────────────────────────────────
     // Notes, reminders and the bell/SSE stream are all keyed by the lead-app userId.
-    const currentUserId  = rawUser?.userId || localStorage.getItem('userId') || '';
+    const currentUserId  = rawUser?.userId || '';
     const adminHasPhone  = Boolean(userDetails?.phone);
 
     // Admin identity + access level are resolved centrally in AccountContext.
@@ -1042,8 +1041,7 @@ const LeadsGrid = () => {
         // roster=1 → full account roster so any admin can assign a lead to another admin
         api.get('/api/ui/admins/list', { params: { acctId, limit: 200, roster: 1 } })
             .then(res => {
-                const raw = res.data;
-                const list = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
+                const list = res.data.admins;
                 setAdminsList(list.filter(a => a.userId));
             })
             .catch(() => setAdminsList([]));
@@ -1396,7 +1394,12 @@ const LeadsGrid = () => {
 
             const res = await api.get('/api/ui/leads', { params, signal: controller.signal });
             if (generation !== leadsGenerationRef.current) return;
-            const normalized = normalizeListResponse(res);
+            const normalized = {
+                items: res.data.data,
+                nextCursor: res.data.pageInfo.nextCursor,
+                hasNext: res.data.pageInfo.hasNextPage,
+                total: res.data.total,
+            };
             const newLeads = normalized.items;
             setLeads(newLeads);
             setTotalRecords(normalized.total);
@@ -1483,7 +1486,7 @@ const LeadsGrid = () => {
 
     const handleSetDefault = async (collectionId) => {
         try {
-            await api.put(`/api/ui/leads/collections/${collectionId}/default`, { acctId });
+            await api.put(`/api/ui/leads/collections/${collectionId}/default`, null, { params: { acctId } });
             setCollections(prev => prev.map(c => ({ ...c, default: c._id === collectionId })));
             showSuccess('Default collection updated.');
         } catch (err) {
@@ -1666,7 +1669,7 @@ const LeadsGrid = () => {
         setIsSaving(true);
         try {
             if (editLead) {
-                await api.put(`/api/ui/leads/${editLead._id}`, draft, { params: { acctId, acctNo } });
+                await api.put(`/api/ui/leads/${editLead._id}`, draft, { params: { acctId } });
                 showSuccess('Lead updated successfully.');
             } else {
                 const activeCat    = collections.find(c => c._id === selectedCollection);
@@ -1950,7 +1953,6 @@ const LeadsGrid = () => {
                 actionLabel={activeExportId ? 'Cancel export' : undefined}
                 onAction={activeExportId ? cancelExport : undefined}
             />
-            <NotificationComponent />
             <AppNavbar activePage="leads" firedCount={firedCount} setFiredCount={setFiredCount} />
 
             <div className="flex-1 min-w-0 overflow-hidden flex flex-col px-3 sm:px-4 py-3 relative">

@@ -12,9 +12,9 @@ import AppNavbar from '../components/AppNavbar';
 const ProfilePage = () => {
     const { user, userDetails, checkAuth, adminViewActive } = useAuth();
     const { acctId } = useAccount();
-    const { showSuccess, showError, NotificationComponent } = useNotifications();
+    const { showSuccess, showError } = useNotifications();
 
-    const userId = localStorage.getItem('userId') || user?.userId || user?.id || '';
+    const userId = user?.userId || '';
 
     // ── User data (fetched from GET /api/user/users/:userId) ──────────────────
     const [userData, setUserData] = useState({ name: '', email: '', phone: '', role: '', roleLabel: '' });
@@ -44,7 +44,7 @@ const ProfilePage = () => {
         setUserDataLoading(true);
         try {
             const res = await authApi.get(`/api/user/users/${userId}`);
-            const u = res.data?.user || res.data || {};
+            const u = res.data.user;
             setUserData({
                 name: u.name || '',
                 email: u.email || '',
@@ -190,7 +190,7 @@ const ProfilePage = () => {
             const res = await authApi.put(`/api/user/myprofileUpload/${userId}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
-            const imageUrl = res.data?.data?.imageUrl || res.data?.fileUrl || res.data?.imageUrl || '';
+            const imageUrl = res.data.data.imageUrl;
             if (imageUrl) {
                 setAvatarPreview(`${imageUrl}?t=${Date.now()}`);
             } else {
@@ -209,7 +209,6 @@ const ProfilePage = () => {
 
     return (
         <div className="min-h-screen bg-gray-50">
-            <NotificationComponent />
             {/* ── Navbar ───────────────────────────────────────────────────── */}
             <AppNavbar activePage={null} />
             {/* ── Page body ─────────────────────────────────────────────────── */}

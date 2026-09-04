@@ -58,14 +58,10 @@ export const redirectToSSOLogout = () => {
     window.location.href = logoutUrl;
 };
 
-/**
- * Normalize user data fields (different backends may use 'id', '_id', or 'userId').
- * Also stores non-sensitive identifiers in localStorage for convenience.
- * @param {object} userData - Raw user object from the backend
- */
+/** Normalize the canonical user shape returned by SSO. */
 export const normalizeUserData = (userData = {}) => {
-    const normalized = {
-        userId: userData.userId || userData.id || userData._id || null,
+    return {
+        userId: userData.userId || null,
         email: userData.email || null,
         name: userData.name || '',
         profileImageUrl: userData.profileImageUrl || '',
@@ -73,14 +69,6 @@ export const normalizeUserData = (userData = {}) => {
         acctNo: userData.acctNo || null,
         role: userData.role || null,
     };
-
-    // Store only non-sensitive identifiers in localStorage
-    if (normalized.userId) localStorage.setItem('userId', normalized.userId);
-    if (normalized.acctId) localStorage.setItem('acctId', normalized.acctId);
-    if (normalized.acctNo) localStorage.setItem('acctNo', normalized.acctNo);
-    if (normalized.email) localStorage.setItem('userEmail', normalized.email.trim().toLowerCase());
-
-    return normalized;
 };
 
 /**

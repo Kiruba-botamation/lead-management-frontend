@@ -255,7 +255,7 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
         onError('');
         try {
             const res = await authApi.get(`/api/user/users/${admin.userId}`);
-            const user = res.data?.user || res.data || {};
+            const user = res.data.user;
             setDraft(current => ({
                 ...current,
                 firstName: user.name ?? current.firstName,
@@ -441,11 +441,9 @@ const AdminTab = ({ acctId }) => {
             if (sortBy) { params.sortBy = sortBy; params.sortOrder = order; }
             const response = await api.get(endpoint, { params, signal: controller.signal });
             if (requestRef.current.generation !== generation) return;
-            const data = response.data;
-            const list = Array.isArray(data) ? data : (data.admins || data.data || []);
-            const pagination = data.pagination || null;
+            const { admins: list, pagination, currentUserAccessLevel } = response.data;
             setAdmins(list);
-            setCurrentAccessLevel(data.currentUserAccessLevel ?? null);
+            setCurrentAccessLevel(currentUserAccessLevel ?? null);
             setTotalRecords(pagination?.total ?? list.length);
             setTotalPages(pagination?.pages ?? 1);
             setCurrentPage(pagination?.page ?? page);

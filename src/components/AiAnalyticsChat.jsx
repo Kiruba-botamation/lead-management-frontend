@@ -731,9 +731,8 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, collections = [], currentCha
             const response = await api.post('/api/ui/analytics/ai/chat', {
                 message: messageToSend,
                 history: historyRef.current,
-                acctId,
                 currentCharts: chartContext,
-            });
+            }, { params: { acctId } });
 
             const data = response.data?.data;
             if (!data) throw new Error('Empty response from AI service');
@@ -756,27 +755,11 @@ const AiAnalyticsChat = ({ isOpen, onClose, acctId, collections = [], currentCha
                     onQuickReply: (reply) => sendMessage(reply),
                 }]);
             } else if (data.type === 'charts') {
-                // Client-side edit detection fallback — if AI forgot to set editChartId
-                // but returned a chart whose name matches (or is contained within) an existing dashboard chart, treat it as an edit.
-                const resolvedCharts = (data.charts || []).map(chart => {
-                    if (chart.editChartId != null) return chart; // AI already set it
-                    const aiName = (chart.chartName || '').toLowerCase().trim();
-                    const match = currentCharts.find(existing => {
-                        const existingName = (existing.chartName || '').toLowerCase().trim();
-                        if (!existingName || !aiName) return false;
-                        // Exact match
-                        if (existingName === aiName) return true;
-                        // Word-level: all significant words of the existing name appear in the AI name
-                        const words = existingName.split(/\s+/).filter(w => w.length > 3);
-                        return words.length > 0 && words.every(w => aiName.includes(w));
-                    });
-                    return match ? { ...chart, editChartId: match.id } : chart;
-                });
                 setMessages(prev => [...prev, {
                     id: aiMsgId,
                     role: 'assistant',
                     text: data.message,
-                    charts: resolvedCharts,
+                    charts: data.charts || [],
                 }]);
             } else {
                 throw new Error('Unexpected response type from AI');

@@ -27,11 +27,10 @@ import api from '../../api/axiosConfig';
 import { activityApi } from '../../api/notesApi';
 import Tooltip from '../Tooltip';
 import { tint, twoLetterColor, adminDisplayName } from './leadShared';
-import { normalizeListResponse } from './pagination';
 
 const PAGE = 15;
 const MAX_RETAINED_PAGES = 5;
-const EMPTY_COL = { leads: [], page: 0, nextCursor: null, nextPage: null, total: null, loading: false, done: false, error: null };
+const EMPTY_COL = { leads: [], page: 0, nextCursor: null, total: null, loading: false, done: false, error: null };
 
 /** Mirror of LeadsGrid.isFilterActive — kept local so the Kanban builds the
  *  exact same `fieldFilters` payload as the grid. */
@@ -523,7 +522,12 @@ const LeadsKanban = ({
         try {
             const res = await api.get('/api/ui/leads', { params: buildParams(stageId, cursor, page), signal: controller.signal });
             if (generation !== generationRef.current) return;
-            const normalized = normalizeListResponse(res);
+            const normalized = {
+                items: res.data.data,
+                nextCursor: res.data.pageInfo.nextCursor,
+                hasNext: res.data.pageInfo.hasNextPage,
+                total: res.data.total,
+            };
             const newLeads = normalized.items;
             setColumns(prev => {
                 const col = prev[stageId] || EMPTY_COL;
@@ -535,7 +539,6 @@ const LeadsKanban = ({
                         leads,
                         page: replace ? 1 : (col.page || 0) + 1,
                         nextCursor: normalized.nextCursor,
-                        nextPage: normalized.nextPage,
                         total: normalized.total,
                         loading: false,
                         done: !normalized.hasNext,
@@ -589,7 +592,6 @@ const LeadsKanban = ({
         if (!col || col.loading || col.done) return;
         fetchPage(stageId, {
             cursor: col.nextCursor,
-            page: col.nextCursor == null ? col.nextPage : null,
         });
     }, [fetchPage]);
 
@@ -608,7 +610,7 @@ const LeadsKanban = ({
             };
         });
         try {
-            await api.put(`/api/ui/leads/${lead._id}`, { stage: Number(toStageId) }, { params: { acctId, acctNo } });
+            await api.put(`/api/ui/leads/${lead._id}`, { stage: Number(toStageId) }, { params: { acctId } });
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to move lead.');
             // Revert by refetching both affected columns.
@@ -635,7 +637,7 @@ const LeadsKanban = ({
             return { ...prev, [lead.stage]: { ...col, leads: col.leads.map(l => l._id === lead._id ? { ...l, ...optimistic } : l) } };
         });
         try {
-            await api.put(`/api/ui/leads/${lead._id}`, { responsible: userId }, { params: { acctId, acctNo } });
+            await api.put(`/api/ui/leads/${lead._id}`, { responsible: userId }, { params: { acctId } });
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to reassign lead.');
             fetchPage(lead.stage, { replace: true });

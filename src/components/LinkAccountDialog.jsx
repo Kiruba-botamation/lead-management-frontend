@@ -25,7 +25,7 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
     const [error, setError] = useState('');
     const [isLinked, setIsLinked] = useState(false);
 
-    const { showWarning, NotificationComponent } = useNotifications();
+    const { showWarning } = useNotifications();
     const showError = (msg) => setError(msg);
     const clearError = () => setError('');
 
@@ -40,7 +40,7 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
         setIsLoading(true);
 
         try {
-            const userId = user?.userId || localStorage.getItem('userId') || '';
+            const userId = user?.userId || '';
             const userEmail = userDetails?.email || user?.email || '';
             const userPhone = userDetails?.phone || '';
 
@@ -60,7 +60,7 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
                 if (onSave) {
                     onSave({
                         account: {
-                            acctId: data.account?.acctId || data.account?._id || '',
+                            acctId: data.account?.acctId || '',
                             acctNo: data.account?.acctNo || acctNo.trim(),
                             name: data.account?.name || '',
                             accountName: data.account?.name || '',
@@ -98,7 +98,6 @@ const LinkAccountDialog = ({ isOpen, onClose, onSave }) => {
 
     return (
         <>
-            <NotificationComponent />
             {/* Backdrop */}
             <div
                 className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center"

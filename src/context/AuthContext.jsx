@@ -9,24 +9,9 @@ import {
 
 const AuthContext = createContext(null);
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
-const LS_CHATBOT_ADMIN = 'chatbotAdmin'; // JSON: { name, profileImageUrl, chatbotAdminId }
-const LS_ADMIN_ID      = 'adminId';
-
-export function loadChatbotAdminFromStorage() {
-    try {
-        const raw = localStorage.getItem(LS_CHATBOT_ADMIN);
-        return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-}
-
-function saveChatbotAdminToStorage(obj) {
-    try { localStorage.setItem(LS_CHATBOT_ADMIN, JSON.stringify(obj)); } catch { /* ignore */ }
-}
-
 /**
  * Fetch the account_admins list for `acctId`, find the record for the logged-in
- * `userId`, and persist the admin display identity to localStorage + state.
+ * `userId`, and store the admin display identity in context state.
  *
  * Call this on: login, page refresh, account switch, admin list refresh.
  *
@@ -40,15 +25,10 @@ export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAd
     if (!acctId || !userId) return null;
     try {
         const res = await api.get('/api/ui/admins/list', { params: { acctId, userId, limit: 1 }, signal });
-        const raw = res.data;
-        const adminList = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
-
-        const matchedAdmin = adminList[0];
+        const matchedAdmin = res.data.admins[0];
 
         if (!matchedAdmin?._id) return null;
 
-        // Persist the lead-app userId as the canonical identity
-        localStorage.setItem(LS_ADMIN_ID, matchedAdmin.userId);
         setAdminId?.(matchedAdmin.userId);
 
         // Build display name
@@ -63,7 +43,6 @@ export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAd
             accessLevel:     matchedAdmin.accessLevel || '',
         };
 
-        saveChatbotAdminToStorage(data);
         setChatbotAdmin?.(data);
         return data;
     } catch (err) {
@@ -85,11 +64,9 @@ export const AuthProvider = ({ children }) => {
     const [adminResolved, setAdminResolved] = useState(false); // true once the admin lookup has completed
     /**
      * chatbotAdmin — the account_admins record for the logged-in user.
-     * Persisted to localStorage so it's available instantly on next page load
-     * before the async admins/list fetch completes.
      * Shape: { name, profileImageUrl, chatbotAdminId }
      */
-    const [chatbotAdmin, setChatbotAdmin] = useState(() => loadChatbotAdminFromStorage());
+    const [chatbotAdmin, setChatbotAdmin] = useState(null);
 
     // Prevents duplicate checks in React StrictMode
     const authCheckedRef = useRef(false);
@@ -111,8 +88,8 @@ export const AuthProvider = ({ children }) => {
             const response = await api.get('/api/ui/sso/auth', { signal: controller.signal });
             if (generation !== authRequestRef.current.generation) return;
 
-            if (response.data.success || response.data.user) {
-                const rawUser = response.data.user || response.data.data || {};
+            if (response.data.success) {
+                const rawUser = response.data.user;
                 const userData = normalizeUserData(rawUser);
 
                 setAuthenticated(true);
@@ -122,7 +99,6 @@ export const AuthProvider = ({ children }) => {
                 // NOTE: chatbotAdmin resolution (admins/list lookup) is triggered by
                 // LeadsGrid whenever acctId becomes available or changes. This is because
                 // acctId no longer lives in the JWT — it comes from the account switcher.
-                // On first load, loadChatbotAdminFromStorage() provides instant fallback.
 
                 // ── Optional: Fetch full user profile from auth backend ──────
                 if (userData.userId) {
@@ -140,11 +116,6 @@ export const AuthProvider = ({ children }) => {
                                 roleLabel: profile.roleLabel,
                                 profileImageUrl: profile.profileImageUrl || '',
                             });
-                            // Persist email so it's available on next page load before the
-                            // async profile fetch completes (e.g. analytics admin matching).
-                            if (profile.email) {
-                                localStorage.setItem('userEmail', profile.email.trim().toLowerCase());
-                            }
                         }
                         })
                         .catch(profileError => {

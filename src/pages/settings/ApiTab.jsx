@@ -13,7 +13,7 @@ import { Input } from '../../components/ui/Input';
 
 const ApiTab = ({ acctId: acctIdProp }) => {
     const resolvedAcctId = acctIdProp || localStorage.getItem('acctId') || '';
-    const { showSuccess, showError, NotificationComponent } = useNotifications();
+    const { showSuccess, showError } = useNotifications();
 
     const [token, setToken] = useState('');      // stores masked or real token depending on state
     const [loading, setLoading] = useState(false);
@@ -55,10 +55,7 @@ const ApiTab = ({ acctId: acctIdProp }) => {
         if (!resolvedAcctId) { showError('No account ID available.'); return; }
         setLoading(true);
         try {
-            const response = await api.post('/api/ui/accounts/token', {
-                acctId: resolvedAcctId,
-                masked: true,
-            });
+            const response = await api.post('/api/ui/accounts/token', { masked: true }, { params: { acctId: resolvedAcctId } });
             setToken(response.data.apiKey || '');
             setShowToken(false);
         } catch (err) {
@@ -73,10 +70,7 @@ const ApiTab = ({ acctId: acctIdProp }) => {
         if (!resolvedAcctId) { showError('No account ID available.'); return; }
         setLoading(true);
         try {
-            const response = await api.post('/api/ui/accounts/token', {
-                acctId: resolvedAcctId,
-                masked: false,
-            });
+            const response = await api.post('/api/ui/accounts/token', { masked: false }, { params: { acctId: resolvedAcctId } });
             const real = response.data.apiKey || '';
             setToken(real);
             setShowToken(true);
@@ -110,15 +104,12 @@ const ApiTab = ({ acctId: acctIdProp }) => {
             if (cachedRealToken.current) {
                 await navigator.clipboard.writeText(cachedRealToken.current);
                 // Also refresh in the background to keep cache fresh
-                api.post('/api/ui/accounts/token', { acctId: resolvedAcctId, masked: false })
+                api.post('/api/ui/accounts/token', { masked: false }, { params: { acctId: resolvedAcctId } })
                     .then(r => { cachedRealToken.current = r.data.apiKey || cachedRealToken.current; })
                     .catch(() => { });
             } else {
                 // No cache yet — fetch then copy
-                const response = await api.post('/api/ui/accounts/token', {
-                    acctId: resolvedAcctId,
-                    masked: false,
-                });
+                const response = await api.post('/api/ui/accounts/token', { masked: false }, { params: { acctId: resolvedAcctId } });
                 const realToken = response.data.apiKey || '';
                 cachedRealToken.current = realToken;
                 if (realToken) await navigator.clipboard.writeText(realToken);
@@ -134,9 +125,7 @@ const ApiTab = ({ acctId: acctIdProp }) => {
         setLoading(true);
         setShowConfirm(false);
         try {
-            const response = await api.post('/api/ui/accounts/token/regenerate', {
-                acctId: resolvedAcctId,
-            });
+            const response = await api.post('/api/ui/accounts/token/regenerate', null, { params: { acctId: resolvedAcctId } });
             if (response.status !== 200) throw new Error('Failed to regenerate token.');
             // After regeneration, show the real new key
             await fetchRealToken();
@@ -149,7 +138,6 @@ const ApiTab = ({ acctId: acctIdProp }) => {
 
     return (
         <div className="max-w-xl">
-            <NotificationComponent />
             <h2 className="text-base font-bold text-gray-900 mb-1">API Key</h2>
             <p className="text-xs text-gray-500 mb-5">
                 Use this key to authenticate requests to the Lead Management API.

@@ -18,30 +18,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================
-   LEGACY ALIASES — map old names to new tokens
-   (keeps any remaining code that references old
-    variable names working during migration)
-   ============================================ */
-:root {
-    --color-dark:           var(--color-gray-900);
-    --color-dark-secondary: var(--color-gray-800);
-    --color-error:          var(--color-danger);
-
-    --gradient-secondary: linear-gradient(135deg, var(--color-gray-800) 0%, var(--color-gray-700) 100%);
-    --gradient-glass:     linear-gradient(135deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.05) 100%);
-    --shadow-glow:        0 0 20px rgba(0, 0, 0, 0.20);
-
-    --spacing-xs:  var(--space-xs);
-    --spacing-sm:  var(--space-sm);
-    --spacing-md:  var(--space-md);
-    --spacing-lg:  var(--space-lg);
-    --spacing-xl:  var(--space-xl);
-    --spacing-2xl: var(--space-2xl);
-
-    --transition-base: var(--transition-normal);
-}
-
 /* Badge */
 .badge {
     display: inline-flex;
@@ -70,7 +46,7 @@
 }
 
 .badge-error {
-    background: var(--color-dark);
+    background: var(--color-gray-900);
     color: var(--color-white);
 }
 
@@ -81,7 +57,7 @@
     padding: 0.75rem 1.5rem;
     border-radius: var(--radius-lg);
     font-weight: 600;
-    transition: all var(--transition-base);
+    transition: all var(--transition-normal);
     box-shadow: var(--shadow-md);
     border: none;
     cursor: pointer;
@@ -99,11 +75,11 @@
 
 .btn-secondary {
     background: var(--color-white);
-    color: var(--color-dark);
+    color: var(--color-gray-900);
     padding: 0.75rem 1.5rem;
     border-radius: var(--radius-lg);
     font-weight: 600;
-    transition: all var(--transition-base);
+    transition: all var(--transition-normal);
     box-shadow: var(--shadow-sm);
     border: 2px solid var(--color-gray-300);
     cursor: pointer;

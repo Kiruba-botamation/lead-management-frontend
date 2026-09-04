@@ -3,9 +3,9 @@ import api from './axiosConfig';
 const BASE = (leadId) => `/api/ui/leads/${leadId}/reminders`;
 
 export const remindersApi = {
-    /** Fetch reminders for a lead. Supports cursor or page pagination. */
-    getAll:   (leadId, acctId, { cursor, page, limit = 25, signal } = {}) => api.get(BASE(leadId), {
-        params: { acctId, limit, ...(cursor != null && { cursor }), ...(page != null && { page }) },
+    /** Fetch reminders for a lead. */
+    getAll:   (leadId, acctId, { cursor, limit = 25, signal } = {}) => api.get(BASE(leadId), {
+        params: { acctId, limit, ...(cursor != null && { cursor }) },
         signal,
     }),
 

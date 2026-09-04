@@ -63,7 +63,7 @@ export const AccountProvider = ({ children }) => {
 
     // ── Fetch linked accounts from backend ────────────────────────────────────
     const fetchAccounts = useCallback(async () => {
-        const userId = user?.userId || localStorage.getItem('userId');
+        const userId = user?.userId;
         if (!userId) return;
 
         accountsRequestRef.current.controller?.abort();
@@ -147,7 +147,7 @@ export const AccountProvider = ({ children }) => {
     // navbar can gate Admin/Settings on accessLevel. Also pushes the user's
     // current email/phone onto their admin record (contact sync).
     useEffect(() => {
-        const userId = user?.userId || localStorage.getItem('userId') || '';
+        const userId = user?.userId || '';
         if (!acctId || !userId) return;
 
         const controller = new AbortController();
@@ -160,10 +160,10 @@ export const AccountProvider = ({ children }) => {
             setAdminResolved(true);
 
             // Contact sync — keep email/phone on the admin record current with the profile
-            const email = userDetails?.email || localStorage.getItem('userEmail') || '';
+            const email = userDetails?.email || user?.email || '';
             const phone = userDetails?.phone || '';
             if (data && (email || phone)) {
-                api.post('/api/ui/admins/contact', { acctId, email, phone }, { signal: controller.signal }).catch(() => { /* non-fatal */ });
+                api.post('/api/ui/admins/contact', { email, phone }, { params: { acctId }, signal: controller.signal }).catch(() => { /* non-fatal */ });
             }
         })();
 

@@ -14,9 +14,8 @@ import NoteCard         from './NoteCard';
 import AddNoteForm      from './AddNoteForm';
 import ReminderCard     from './ReminderCard';
 import AddReminderForm  from './AddReminderForm';
-import { normalizeListResponse } from './leads/pagination';
 
-const EMPTY_PAGE = { nextCursor: null, nextPage: null, hasNext: false, total: null };
+const EMPTY_PAGE = { nextCursor: null, hasNext: false, total: null };
 
 const sortReminders = (rems) => {
     const now = new Date();
@@ -134,16 +133,19 @@ export default function LeadActivityPanel({
                 limit: 25,
                 signal: controller.signal,
                 ...(pageToken?.cursor != null && { cursor: pageToken.cursor }),
-                ...(pageToken?.page != null && { page: pageToken.page }),
             };
             const res = tab === 'notes'
                 ? await notesApi.getAll(leadId, acctId, options)
                 : await remindersApi.getAll(leadId, acctId, options);
             if (generation !== generationsRef.current[tab]) return;
-            const normalized = normalizeListResponse(res);
+            const normalized = {
+                items: res.data.data,
+                nextCursor: res.data.pageInfo.nextCursor,
+                hasNext: res.data.pageInfo.hasNextPage,
+                total: res.data.total,
+            };
             const pageState = {
                 nextCursor: normalized.nextCursor,
-                nextPage: normalized.nextPage,
                 hasNext: normalized.hasNext,
                 total: normalized.total,
             };
@@ -191,7 +193,6 @@ export default function LeadActivityPanel({
         if (!pageState.hasNext) return;
         fetchTab(activeTab, {
             cursor: pageState.nextCursor,
-            page: pageState.nextCursor == null ? pageState.nextPage : null,
         }, true);
     };
 

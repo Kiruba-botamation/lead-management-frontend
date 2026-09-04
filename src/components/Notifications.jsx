@@ -273,12 +273,6 @@ export function NotificationViewport() {
     );
 }
 
-/**
- * Stable compatibility component for existing callers. Rendering is centralized
- * in NotificationViewport, so legacy per-hook owners intentionally render nothing.
- */
-export function NotificationComponent() { return null; }
-
-const notificationsApi = Object.freeze({ ...notificationActions, NotificationComponent });
+const notificationsApi = notificationActions;
 
 export const useNotifications = () => notificationsApi;

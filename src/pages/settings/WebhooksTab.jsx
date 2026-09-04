@@ -71,7 +71,7 @@ const rowsToHeaders = (rows) => {
 
 const WebhooksTab = ({ acctId: acctIdProp }) => {
     const acctId = acctIdProp || localStorage.getItem('acctId') || '';
-    const { showSuccess, showError, NotificationComponent } = useNotifications();
+    const { showSuccess, showError } = useNotifications();
 
     const [events, setEvents] = useState([]);
     const [configs, setConfigs] = useState([]);
@@ -256,7 +256,7 @@ const WebhooksTab = ({ acctId: acctIdProp }) => {
 
     const toggleActive = async (cfg) => {
         try {
-            await api.put(`/api/ui/webhooks/${cfg._id}`, { acctId, active: !cfg.active });
+            await api.put(`/api/ui/webhooks/${cfg._id}`, { active: !cfg.active }, { params: { acctId } });
             setConfigs(prev => prev.map(c => c._id === cfg._id ? { ...c, active: !c.active } : c));
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to update webhook.');
@@ -277,7 +277,6 @@ const WebhooksTab = ({ acctId: acctIdProp }) => {
 
     return (
         <div className="max-w-2xl">
-            <NotificationComponent />
             <div className="flex items-start justify-between mb-1">
                 <h2 className="text-base font-bold text-gray-900">Webhooks</h2>
                 {isSuperadmin && !showForm && (

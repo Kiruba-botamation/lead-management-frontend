@@ -4,7 +4,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
 import { useAuth } from '../context/AuthContext';
-import { resolveActiveAcctNo, getAcctIdFromLocalStorage } from '../utils/accountHelpers';
 import { Combobox } from '../components/ui/Combobox';
 import {
     PieChart, Pie, Cell, Sector, BarChart, Bar, AreaChart, Area, LineChart, Line,
@@ -476,11 +475,9 @@ const AnalyticsDashboardPage = () => {
     };
 
     const normalizeChart = (entry) => {
-        const todayISO = getTodayISO();
+        const numericId = Number(entry.id);
         const preset = entry._datePreset || 'today';
         const resolvedDates = resolveDatesForPreset(preset, entry._lastNDays || 7);
-        const legacyDateField = DATE_AXIS_FIELDS.includes(entry.xAxis?.value) ? entry.xAxis.value : 'updatedAt';
-        const dateFilterField = DATE_AXIS_FIELDS.includes(entry.dateFilterField) ? entry.dateFilterField : legacyDateField;
         const numberSplitCount = entry.numberSplitCount === 'auto'
             ? 'auto'
             : Number.isInteger(entry.numberSplitCount) && entry.numberSplitCount >= 0 && entry.numberSplitCount <= 15
@@ -489,13 +486,13 @@ const AnalyticsDashboardPage = () => {
         return {
             ...defaultChartConfig,
             ...entry,
-            id: entry.id,
+            id: Number.isFinite(numericId) ? numericId : entry.id,
             _datePreset: preset,
-            dateFilterField,
+            dateFilterField: DATE_AXIS_FIELDS.includes(entry.dateFilterField) ? entry.dateFilterField : defaultChartConfig.dateFilterField,
             numberSplitCount,
             // For relative presets, always recompute from today so stale saved dates are never used
-            dateFilterFrom: resolvedDates ? resolvedDates.dateFilterFrom : (entry.dateFilterFrom || todayISO),
-            dateFilterTo: resolvedDates ? resolvedDates.dateFilterTo : (entry.dateFilterTo || todayISO),
+            dateFilterFrom: resolvedDates ? resolvedDates.dateFilterFrom : (entry.dateFilterFrom || defaultChartConfig.dateFilterFrom),
+            dateFilterTo: resolvedDates ? resolvedDates.dateFilterTo : (entry.dateFilterTo || defaultChartConfig.dateFilterTo),
         };
     };
 
@@ -871,10 +868,11 @@ const AnalyticsDashboardPage = () => {
 
     // Fetch chart data from backend API
     // silent=true skips the per-chart loading mask (used by auto-refresh)
-    const fetchChartDataFromBackend = async (chartId, chartConfig, silent = false, markClean = false) => {
-        const currentAcctId = acctIdRef.current;
+    const fetchChartDataFromBackend = async (chartId, chartConfig, silent = false, markClean = false, acctIdOverride = null) => {
+        const currentAcctId = acctIdOverride || acctId;
         const currentViewingAs = viewingAsRef.current;
         const isNumber = chartConfig.chartType?.value === 'number';
+        if (!currentAcctId) return;
         if (isNumber ? (!chartConfig.yAxis || !chartConfig.aggregation) : (!chartConfig.xAxis || !chartConfig.yAxis || !chartConfig.aggregation)) {
             return;
         }
@@ -892,6 +890,8 @@ const AnalyticsDashboardPage = () => {
             signature: requestSignature,
         };
         chartRequestsRef.current[chartId] = request;
+        const showLoading = !silent
+            || !Object.prototype.hasOwnProperty.call(chartDataCacheRef.current, chartId);
         const isCurrentRequest = () => {
             if (chartRequestsRef.current[chartId] !== request) return false;
             if (chartRequestContextGenerationRef.current !== request.contextGeneration) return false;
@@ -902,7 +902,7 @@ const AnalyticsDashboardPage = () => {
         if (markClean && requestSignature) {
             setChartRequestSignatures(prev => ({ ...prev, [chartId]: requestSignature }));
         }
-        if (!silent) setChartLoadingState(prev => ({ ...prev, [chartId]: true }));
+        if (showLoading) setChartLoadingState(prev => ({ ...prev, [chartId]: true }));
         try {
             const xAxisValue = isNumber ? chartConfig.yAxis.value : chartConfig.xAxis.value;
             const isDateAxis = xAxisValue === 'createdAt' || xAxisValue === 'updatedAt';
@@ -912,17 +912,16 @@ const AnalyticsDashboardPage = () => {
                 xAxis: xAxisValue,
                 yAxis: chartConfig.yAxis.value,
                 aggregation: chartConfig.aggregation.value === 'average' ? 'avg' : chartConfig.aggregation.value,
-                ...(currentAcctId && { acctId: currentAcctId }),
                 ...(effectiveCollectionId && { collectionId: effectiveCollectionId }),
                 ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? { zAxis: chartConfig.zAxis.value } : {}),
                 ...(chartConfig.dateFilterFrom && { dateFrom: chartConfig.dateFilterFrom }),
                 ...(chartConfig.dateFilterTo && { dateTo: chartConfig.dateFilterTo }),
                 dateFilterField: chartConfig.dateFilterField || (isDateAxis ? xAxisValue : 'updatedAt'),
-                ...(isDateAxis ? { dateGranularity: chartConfig.dateGranularity || 'day' } : {}),
-                ...(currentViewingAs && { viewingAs: currentViewingAs })
+                ...(isDateAxis ? { dateGranularity: chartConfig.dateGranularity || 'day' } : {})
             };
 
-            const response = await api.post('/api/ui/analytics/chart-data', params, { signal: controller.signal });
+            const chartDataUrl = `/api/ui/analytics/chart-data?acctId=${encodeURIComponent(currentAcctId)}`;
+            const response = await api.post(chartDataUrl, params, { signal: controller.signal });
             if (!isCurrentRequest()) return;
             const data = response.data.data || [];
             // For date-axis charts sort chronologically; otherwise sort by value descending
@@ -942,7 +941,7 @@ const AnalyticsDashboardPage = () => {
         } finally {
             if (chartRequestsRef.current[chartId] === request) {
                 delete chartRequestsRef.current[chartId];
-                if (!silent) setChartLoadingState(prev => ({ ...prev, [chartId]: false }));
+                if (showLoading) setChartLoadingState(prev => ({ ...prev, [chartId]: false }));
             }
         }
     };
@@ -1092,12 +1091,11 @@ const AnalyticsDashboardPage = () => {
         setSchemaSyncing(true);
         setChartsReady(false);
         try {
-            const userId = localStorage.getItem('userId');
+            const userId = rawUser?.userId;
             const res = await api.get('/api/ui/analytics/get-schema', {
                 params: {
                     userId,
                     acctId: targetAcctId,
-                    viewingAs: targetViewingAs,
                     selectedUserId: targetViewingAs   // explicit: fetch schema for this selected admin
                 }
             });
@@ -1129,7 +1127,7 @@ const AnalyticsDashboardPage = () => {
                 restored.forEach(chart => {
                     const isNum = chart.chartType?.value === 'number';
                     if (isNum ? (chart.yAxis && chart.aggregation) : (chart.xAxis && chart.yAxis && chart.aggregation)) {
-                        fetchChartDataFromBackend(chart.id, chart, true);
+                        fetchChartDataFromBackend(chart.id, chart, true, false, targetAcctId);
                     }
                 });
                 // Pull overwrites local state — nothing new to save
@@ -1164,7 +1162,7 @@ const AnalyticsDashboardPage = () => {
         }
 
         // If currently viewing as a different admin, warn before saving
-        const currentUserAdminId = localStorage.getItem('currentUserAdmin');
+        const currentUserAdminId = rawUser?.userId;
         const isViewingOtherAdmin = viewingAs && currentUserAdminId && viewingAs !== currentUserAdminId;
         if (isViewingOtherAdmin) {
             setSaveWarningOpen(true);
@@ -1181,7 +1179,7 @@ const AnalyticsDashboardPage = () => {
         try {
             flushPendingDashboardSave();
             // Always save under the current logged-in user's lead-app userId.
-            const userId = rawUser?.userId || localStorage.getItem('userId');
+            const userId = rawUser?.userId;
 
             const schema = readStore();
             const acctKey = acctId || 'default';
@@ -1192,9 +1190,8 @@ const AnalyticsDashboardPage = () => {
             // Schemas are keyed by userId on the backend — save under the caller's userId.
             await api.post('/api/ui/analytics/save-schema', {
                 userId: userId,
-                acctId: acctId,
                 schema: userSchema
-            });
+            }, { params: { acctId } });
 
             setHasUnsavedChanges(false);
             setSchemaSavedOnce(true);
@@ -1411,6 +1408,14 @@ const AnalyticsDashboardPage = () => {
 
     // Persist charts after edits settle, and invalidate requests for superseded configs.
     useEffect(() => {
+        // A restore effect may have synchronously populated chartsRef and started data
+        // requests while this render still holds the previous chart array. Do not let
+        // that stale render overwrite the ref or cancel the restore requests.
+        if (skipSaveRef.current) {
+            skipSaveRef.current = false;
+            return;
+        }
+
         chartsRef.current = charts; // always keep ref current
         const staleRequestIds = [];
         Object.entries(chartRequestsRef.current).forEach(([id, request]) => {
@@ -1428,7 +1433,6 @@ const AnalyticsDashboardPage = () => {
                 return next;
             });
         }
-        if (skipSaveRef.current) { skipSaveRef.current = false; return; }
         if (!acctId || !viewingAs) return;
         scheduleDashboardSave(acctId, viewingAs, charts);
     }, [charts, acctId, viewingAs]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1441,9 +1445,7 @@ const AnalyticsDashboardPage = () => {
         setCollectionLoading(true);
         try {
             const response = await api.get('/api/ui/leads/collections', { params: { acctId } });
-            const d = response.data;
-            const raw = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.collections) ? d.collections : [];
-            const filtered = raw.filter(item => item?._id && item?.collectionName);
+            const filtered = response.data.data.filter(item => item?._id && item?.collectionName);
             setCollections(filtered);
         } catch (err) {
             console.error('Error fetching collections:', err);
@@ -1468,15 +1470,14 @@ const AnalyticsDashboardPage = () => {
         if (adminsLoadedForAcctRef.current === acctId) return;
 
         // The canonical identity is the lead-app userId (admin records no longer store email).
-        const currentUserId = rawUser?.userId || localStorage.getItem('userId') || '';
+        const currentUserId = rawUser?.userId || '';
         if (!currentUserId) return; // wait — auth not ready yet, effect will re-run
 
         adminsLoadedForAcctRef.current = acctId; // mark as loaded for this account
 
         api.get('/api/ui/admins/list', { params: { acctId, limit: 200 } })
             .then(res => {
-                const data = res.data;
-                const list = Array.isArray(data) ? data : (data.admins || data.data || []);
+                const list = res.data.admins;
                 setViewAsAdmins(list);
 
                 if (list.length === 0) {
@@ -1492,8 +1493,6 @@ const AnalyticsDashboardPage = () => {
 
                 // The current user's own admin record
                 const currentUserAdmin = findByUserId(currentUserId);
-                localStorage.setItem('currentUserAdmin', currentUserId);
-
                 // Resolve which admin to select:
                 //   1. A previously persisted "View As" choice (different admin, stored per account)
                 //   2. Default to the current user's own record
@@ -1503,7 +1502,7 @@ const AnalyticsDashboardPage = () => {
                     adminToSelect = findByUserId(storedViewingAs);
                 }
                 if (!adminToSelect) {
-                    adminToSelect = currentUserAdmin || findByUserId(localStorage.getItem('currentUserAdmin'));
+                    adminToSelect = currentUserAdmin;
                 }
 
                 if (!adminToSelect) {
@@ -1540,7 +1539,7 @@ const AnalyticsDashboardPage = () => {
 
     // The actual admin switch — called either directly or after the user confirms the warning
     const executeViewAsChange = async (selectedAdmin) => {
-        const currentUserId = localStorage.getItem('userId');
+        const currentUserId = rawUser?.userId;
 
         if (!acctId) {
             console.error('Cannot change view: no account selected');
@@ -1559,21 +1558,20 @@ const AnalyticsDashboardPage = () => {
 
             // Call backend with acctId, userId, and selectedUserId
             const response = await api.post('/api/ui/analytics/view-as', {
-                acctId: acctId,
                 userId: currentUserId,
                 selectedUserId: selectedUserId
-            });
+            }, { params: { acctId } });
 
             // Extract viewingAs and schema from backend response
             const viewingAsId = response.data?.viewingAs || null;
-            const schema = response.data?.schema || null;
+            const schema = response.data?.data?.schema || null;
             viewingAsRef.current = viewingAsId;
             updateChartRequestContext(acctId, viewingAsId);
 
             // If backend returned a schema, save it to localStorage — but only when NOT
             // switching back to own admin. For own admin, localStorage is the source of truth
             // (it may contain unsaved work that hasn't been pushed to DB yet).
-            const isOwnAdmin = viewingAsId && viewingAsId === localStorage.getItem('currentUserAdmin');
+            const isOwnAdmin = viewingAsId && viewingAsId === rawUser?.userId;
             const localCharts = isOwnAdmin ? loadCharts(acctId, viewingAsId) : [];
 
             if (isOwnAdmin && localCharts.length > 0) {
@@ -1636,6 +1634,14 @@ const AnalyticsDashboardPage = () => {
                         localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
                     }
                 }
+
+                skipSaveRef.current = true;
+                chartsRef.current = [];
+                setCharts([]);
+                setNextChartId(1);
+                setChartRequestSignatures({});
+                clearChartDataCache();
+                skipViewingAsEffectRef.current = true;
             }
 
             // Update the viewingAs state (triggers the useEffect to load charts when no schema was provided by the branch above)
@@ -1643,12 +1649,14 @@ const AnalyticsDashboardPage = () => {
 
             // Persist the selected admin so the choice survives page refresh.
             // If the user has switched back to their own admin, clear the persisted key.
-            const currentUserAdminId = localStorage.getItem('currentUserAdmin');
+            const currentUserAdminId = rawUser?.userId;
             if (viewingAsId && viewingAsId !== currentUserAdminId) {
                 localStorage.setItem(`analyticsViewingAs_${acctId}`, viewingAsId);
             } else {
                 localStorage.removeItem(`analyticsViewingAs_${acctId}`);
             }
+
+            setChartsReady(true);
 
             console.log('View As changed:', selectedAdmin ? getAdminDisplayName(selectedAdmin) : 'All Admins', '| viewingAs:', viewingAsId);
         } catch (error) {
@@ -2445,9 +2453,7 @@ const AnalyticsDashboardPage = () => {
     };
 
     const renderChart = (chartConfig) => {
-        const hasCompletedFetch = Object.prototype.hasOwnProperty.call(chartDataCache, chartConfig.id);
-        const isLoading = chartLoadingState[chartConfig.id] === true
-            || (isChartConfigured(chartConfig) && !hasCompletedFetch);
+        const isLoading = chartLoadingState[chartConfig.id] === true;
         const chartData = getChartData(chartConfig, chartConfig.id);
         const yAxisLabel = chartConfig.yAxis?.label || 'Value';
         const height = chartConfig.chartHeight || 320;
@@ -2503,15 +2509,7 @@ const AnalyticsDashboardPage = () => {
     };
 
     // True when the current user is viewing another admin's dashboard (read-only mode)
-    const isViewingOtherAdmin = (() => {
-        try {
-            const currentUserId = localStorage.getItem('userId');
-            const currentAdminId = localStorage.getItem('currentUserAdmin') || currentUserId;
-            return !!(viewingAs && currentAdminId && viewingAs !== currentAdminId);
-        } catch {
-            return false;
-        }
-    })();
+    const isViewingOtherAdmin = !!(viewingAs && rawUser?.userId && viewingAs !== rawUser.userId);
 
     // Shared "Update Chart" button used in both header-row (with collections) and no-collection bar
     const renderUpdateChartButton = (chartConfig, mergedConfig) => {
@@ -3244,7 +3242,7 @@ const AnalyticsDashboardPage = () => {
                                                 {activeFields.map((field, fIdx) => {
                                                     const currentVal = (mergedConfig.fieldLabels || {})[field.value] ?? field.label;
                                                     return (
-                                                        <div key={field.value ?? fIdx} className="flex flex-col gap-0.5" style={{ minWidth: 90 }}>
+                                                        <div key={`${field.value ?? 'field'}-${fIdx}`} className="flex flex-col gap-0.5" style={{ minWidth: 90 }}>
                                                             <span className="text-[10px] font-medium text-gray-400 truncate">{field.label}</span>
                                                             <LabelInput
                                                                 initialValue={currentVal}
@@ -3463,7 +3461,7 @@ const AnalyticsDashboardPage = () => {
                                 size="sm"
                                 onClick={async () => {
                                     setSaveWarningOpen(false);
-                                    const ownKey = localStorage.getItem('currentUserAdmin') || localStorage.getItem('userId') || 'default';
+                                    const ownKey = rawUser?.userId;
                                     await executeSchemaSave(ownKey);
                                     const ownAdmin = viewAsAdmins.find(a => String(a.userId || '') === ownKey);
                                     if (ownAdmin) {
@@ -3565,7 +3563,7 @@ const AnalyticsDashboardPage = () => {
                                 {viewAsOpen && (
                                     <div className="absolute left-0 top-full mt-1 min-w-full w-max bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 max-h-64 overflow-y-auto">
                                         {(() => {
-                                            const currentUserAdminId = localStorage.getItem('currentUserAdmin');
+                                            const currentUserAdminId = rawUser?.userId;
                                             const me = viewAsAdmins.find(a => String(a.userId || '') === currentUserAdminId);
                                             const others = viewAsAdmins.filter(a => String(a.userId || '') !== currentUserAdminId);
 

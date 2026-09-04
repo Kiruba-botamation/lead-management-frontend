@@ -25,14 +25,8 @@ export function getBrandLogoSrc() {
 /**
  * Call once at app startup (e.g. in main.jsx before render).
  * Sets the page title and injects the favicon <link> if not already present.
- * Also cleans up any legacy cached data-URLs stored by older versions.
  */
 export function initBrandAssets() {
-    // Clean up legacy localStorage keys from old caching approach
-    ['brandLogoDataUrl', 'brandFaviconDataUrl', 'brandLogoSrc', 'brandFaviconSrc'].forEach(
-        (k) => localStorage.removeItem(k)
-    );
-
     document.title = BRAND_NAME;
 
     if (!BRAND_LOGO_URL) {

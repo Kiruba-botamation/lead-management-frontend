@@ -486,7 +486,6 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
                 xAxis: chartConfig.xAxis.value,
                 yAxis: chartConfig.yAxis.value,
                 aggregation: chartConfig.aggregation.value,
-                ...(acctId && { acctId }),
                 ...(collectionId && { collectionId }),
                 ...((chartConfig.chartMode === 'grouped' || chartConfig.chartMode === 'stacked') && chartConfig.zAxis ? { zAxis: chartConfig.zAxis.value } : {}),
             };
@@ -498,7 +497,8 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
                 params.dateTo = chartConfig.dateFilterTo;
             }
 
-            const response = await api.get('/api/ui/analytics/chart-data', { params });
+            const chartDataUrl = `/api/ui/analytics/chart-data?acctId=${encodeURIComponent(acctId)}`;
+            const response = await api.post(chartDataUrl, params);
             const data = response.data.data || [];
 
             // Sort descending by value
@@ -515,60 +515,6 @@ const AnalyticsDialog = ({ isOpen, onClose }) => {
             console.error('Error fetching chart data:', err);
             return [];
         }
-    };
-
-    // Process data based on X and Y axis selection for a specific chart (fallback for client-side processing)
-    const getChartData = (chartConfig) => {
-        if (!leads.length || !chartConfig.xAxis || !chartConfig.yAxis || !chartConfig.aggregation) return [];
-
-        let filteredLeads = leads;
-        if (chartConfig.dateFilter) {
-            filteredLeads = leads.filter(lead => {
-                if (lead.createdAt) {
-                    const leadDate = new Date(lead.createdAt).toISOString().split('T')[0];
-                    return leadDate === chartConfig.dateFilter;
-                }
-                return false;
-            });
-        }
-
-        const dataMap = {};
-
-        filteredLeads.forEach(lead => {
-            let xKey = lead[chartConfig.xAxis.value];
-
-            if (chartConfig.xAxis.value === 'createdAt' && xKey) {
-                xKey = new Date(xKey).toLocaleDateString();
-            }
-
-            if (!xKey) xKey = 'Unknown';
-
-            if (!dataMap[xKey]) {
-                dataMap[xKey] = { values: [], count: 0 };
-            }
-
-            dataMap[xKey].count++;
-
-            if (chartConfig.aggregation.value === 'sum') {
-                const yValue = lead[chartConfig.yAxis.value];
-                const numValue = parseFloat(yValue);
-                if (!isNaN(numValue)) {
-                    dataMap[xKey].values.push(numValue);
-                }
-            }
-        });
-
-        return Object.entries(dataMap).map(([name, data]) => {
-            let value;
-
-            if (chartConfig.aggregation.value === 'count') {
-                value = data.count;
-            } else if (chartConfig.aggregation.value === 'sum') {
-                value = data.values.reduce((sum, val) => sum + val, 0);
-            }
-
-            return { name, value };
-        }).sort((a, b) => b.value - a.value);
     };
 
     const renderChart = (chartConfig) => {

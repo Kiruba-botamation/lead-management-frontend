@@ -16,11 +16,11 @@ import { Input } from '../../components/ui/Input';
 
 const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
     const navigate = useNavigate();
-    const { logout } = useAuth();
-    const { fetchAccounts } = useAccount();
-    const { showError, NotificationComponent } = useNotifications();
+    const { user } = useAuth();
+    const { acctId: contextAcctId, fetchAccounts } = useAccount();
+    const { showError } = useNotifications();
 
-    const resolvedAcctId = acctIdProp || localStorage.getItem('acctId') || '';
+    const resolvedAcctId = acctIdProp || contextAcctId || '';
 
     const [storedAcctNo, setStoredAcctNo] = useState('');
     const [typedAcctNo, setTypedAcctNo] = useState('');
@@ -64,7 +64,7 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
             return;
         }
 
-        const userId = localStorage.getItem('userId');
+        const userId = user?.userId;
         if (!userId) {
             handleShowError('User ID not found. Please log in again.');
             setIsConfirmOpen(false);
@@ -93,11 +93,11 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
             // Refresh AccountContext and redirect
             let nextAcctNo = '';
             try {
-                const resp = await api.get(`/api/accounts/user/${userId}`);
-                const remaining = resp.data?.accounts || [];
+                const resp = await api.get(`/api/ui/accounts/user/${userId}`);
+                const remaining = resp.data.accounts;
                 nextAcctNo = remaining[0]?.acctNo || '';
                 if (remaining.length > 0) {
-                    localStorage.setItem('acctId', remaining[0]?.acctId || remaining[0]?._id || '');
+                    localStorage.setItem('acctId', remaining[0]?.acctId || '');
                     localStorage.setItem('acctNo', nextAcctNo);
                     localStorage.setItem('acctName', remaining[0]?.accountName || '');
                 }
@@ -122,7 +122,6 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
 
     return (
         <div className="max-w-xl">
-            <NotificationComponent />
             <h2 className="text-base font-bold text-gray-900 mb-1">Delete Account</h2>
             <p className="text-xs text-gray-500 mb-5">
                 Permanently delete this account and all its associated data. This action cannot be undone.

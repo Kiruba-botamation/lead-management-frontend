@@ -93,13 +93,12 @@ const SYSTEM_FIELD_KEYS = new Set(SYSTEM_FIELDS.map(f => f.field));
 
 // System predefined fields shown in the API documentation. These are ALWAYS
 // accepted by the lead-intake API regardless of the collection's custom fields.
-// `stage` is included here (it's accepted by the API) even though it isn't part
-// of SYSTEM_FIELDS' legacy field-position logic.
+// `stage` is included here because it is accepted by the lead-intake API.
 const API_PREDEFINED_FIELDS = [
     { label: 'Name',        field: 'name',        type: 'text',   required: true,  sample: 'Joe Smith' },
     { label: 'Phone',       field: 'phone',       type: 'text',   required: true,  sample: '+1234567890' },
     { label: 'Email',       field: 'email',       type: 'text',   required: false, sample: 'joe@example.com' },
-    { label: 'Responsible', field: 'responsible', type: 'text', required: false, sample: '{{chatbot_admin_id_or_admin_id_or_user_id}}' },
+    { label: 'Responsible', field: 'responsible', type: 'text', required: false, sample: '{{user_id}}' },
     { label: 'Stage',       field: 'stage',       type: 'number', required: false, sample: 1 },
 ];
 const API_PREDEFINED_KEYS = new Set(API_PREDEFINED_FIELDS.map(f => f.field));
@@ -152,7 +151,7 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
     // Fetch the real API key when the modal opens
     useEffect(() => {
         if (!acctId) return;
-        api.post('/api/ui/accounts/token', { acctId, masked: false })
+        api.post('/api/ui/accounts/token', { masked: false }, { params: { acctId } })
             .then(res => { if (res.data?.apiKey) setApiKey(res.data.apiKey); })
             .catch(() => {}); // silently fall back to placeholder
     }, [acctId]);
@@ -660,7 +659,7 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
 
 const CollectionTab = () => {
     const { acctId, acctNo } = useAccount();
-    const { showSuccess, showError, NotificationComponent } = useNotifications();
+    const { showSuccess, showError } = useNotifications();
 
     const [collections, setCollections]               = useState([]);
     const [selectedId, setSelectedId]                 = useState(null);
@@ -889,7 +888,6 @@ const CollectionTab = () => {
 
     return (
         <div className="flex gap-6 min-h-[480px]">
-            <NotificationComponent />
 
             {/* ── Left sidebar: collection list ────────────────────────── */}
             <div className="w-52 flex-shrink-0 flex flex-col gap-2">
