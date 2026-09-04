@@ -123,7 +123,7 @@ export default function AppNavbar({ activePage = '', onAccountOpen, firedCount =
             }}
         >
             {imgUrl
-                ? <img src={imgUrl} alt="avatar"
+                ? <img src={imgUrl} alt="avatar" loading="lazy" decoding="async"
                     style={{ width: '1.5rem', height: '1.5rem', borderRadius: 'var(--radius-full)', objectFit: 'cover', flexShrink: 0 }} />
                 : <div style={{
                     width: '1.5rem', height: '1.5rem',

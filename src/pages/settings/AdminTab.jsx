@@ -1,11 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { memo, useState, useEffect, useCallback, useRef } from 'react';
 import api, { authApi } from '../../api/axiosConfig';
 import Tooltip from '../../components/Tooltip';
 import Button from '../../components/ui/Button';
 import { Dropdown, DropdownItem } from '../../components/ui/Dropdown';
-
-/** Blank profile-edit form. */
-const EMPTY_FORM = { firstName: '', lastName: '', email: '', phone: '', profileImage: '', accessLevel: 'admin' };
 
 // Fixed column schema for the admin grid.
 //  - `filter`: 'text' shows a debounced text filter; 'select' shows the access-level dropdown; null = no filter
@@ -32,6 +29,19 @@ const getAvatarColor = (str) => {
 };
 
 const fullName = (a) => [a.firstName || '', a.lastName || ''].filter(Boolean).join(' ') || '-';
+
+const buildPageTokens = (totalPages, currentPage) => {
+    const pages = [1, currentPage - 1, currentPage, currentPage + 1, totalPages]
+        .filter((page, index, all) => page >= 1 && page <= totalPages && all.indexOf(page) === index)
+        .sort((a, b) => a - b);
+
+    const tokens = [];
+    pages.forEach((page, index) => {
+        if (index > 0 && page - pages[index - 1] > 1) tokens.push(`ellipsis-${page}`);
+        tokens.push(page);
+    });
+    return tokens;
+};
 
 const AssignmentIdentifiers = ({ admin, copied, onCopy }) => {
     const identifiers = [
@@ -104,8 +114,10 @@ const AccessLevelSelect = ({ roles, value, onChange, disabled }) => {
 
     return (
         <div className="relative" ref={ref}>
-            <button
+            <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 disabled={disabled}
                 onClick={() => setOpen(o => !o)}
                 className="ds-input w-full flex items-center justify-between gap-2 text-left disabled:opacity-50"
@@ -123,16 +135,19 @@ const AccessLevelSelect = ({ roles, value, onChange, disabled }) => {
                 <svg className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
-            </button>
+            </Button>
             {open && (
-                <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl py-1 overflow-hidden">
+                <div className="absolute z-[var(--z-dropdown)] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl py-1 overflow-hidden">
                     {roles.map(r => {
                         const rc = ROLE_COLORS[r.key] || ROLE_COLORS.admin;
                         const isActive = r.key === value;
                         return (
-                            <button
+                            <Button
                                 key={r.key}
                                 type="button"
+                                variant="ghost"
+                                size="sm"
+                                block
                                 onClick={() => { onChange(r.key); setOpen(false); }}
                                 className={`w-full px-3 py-2 flex items-center gap-2.5 text-left text-xs transition-colors ${isActive ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
                             >
@@ -145,11 +160,227 @@ const AccessLevelSelect = ({ roles, value, onChange, disabled }) => {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                                     </svg>
                                 )}
-                            </button>
+                            </Button>
                         );
                     })}
                 </div>
             )}
+        </div>
+    );
+};
+
+const AdminRow = memo(function AdminRow({ admin, copied, onCopy, onEdit }) {
+    const renderCell = (col) => {
+        if (col.type === 'name') {
+            const name = fullName(admin);
+            const display = admin.firstName || name;
+            return (
+                <div className="flex items-center justify-start gap-1.5">
+                    {admin.profileImage ? (
+                        <img src={admin.profileImage} alt={display} loading="lazy" decoding="async" className="w-5 h-5 rounded-full object-cover border border-gray-200 flex-shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                    ) : (
+                        <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-[9px] select-none" style={{ backgroundColor: getAvatarColor(name) }}>
+                            {name && name !== '-' ? name.charAt(0).toUpperCase() : '?'}
+                        </span>
+                    )}
+                    <span>{display}</span>
+                </div>
+            );
+        }
+        if (col.type === 'badge') {
+            const isSuper = admin.accessLevel === 'superadmin';
+            return (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${isSuper ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {isSuper ? 'Super Admin' : 'Admin'}
+                </span>
+            );
+        }
+        if (col.type === 'identifiers') {
+            return (
+                <AssignmentIdentifiers admin={admin} copied={copied} onCopy={onCopy} />
+            );
+        }
+        if (col.type === 'date') return admin[col.key] ? new Date(admin[col.key]).toLocaleDateString() : '-';
+        const value = admin[col.key];
+        return value != null && value !== '' ? String(value) : '-';
+    };
+
+    return (
+        <tr className="hover:bg-gray-50 transition-all duration-200">
+            {COLUMNS.map((col) => (
+                <td key={col.key} className={`px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium ${col.align === 'left' ? 'text-left' : 'text-center'}`}>
+                    {renderCell(col)}
+                </td>
+            ))}
+            <td className="px-3 py-2 whitespace-nowrap text-center">
+                <Tooltip content="Edit admin" placement="top">
+                    <Button type="button" variant="ghost" size="sm" iconOnly onClick={() => onEdit(admin)} aria-label={`Edit ${fullName(admin)}`}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                    </Button>
+                </Tooltip>
+            </td>
+        </tr>
+    );
+});
+
+const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError, onSaved }) => {
+    const [draft, setDraft] = useState(() => ({
+        firstName: admin.firstName || '',
+        lastName: admin.lastName || '',
+        email: admin.email || '',
+        phone: admin.phone || '',
+        profileImage: admin.profileImage || '',
+        accessLevel: admin.accessLevel || 'admin',
+    }));
+    const [previewImage, setPreviewImage] = useState(draft.profileImage);
+    const [saving, setSaving] = useState(false);
+    const [authSyncing, setAuthSyncing] = useState(false);
+
+    useEffect(() => {
+        if (!draft.profileImage) {
+            setPreviewImage('');
+            return undefined;
+        }
+        const timer = setTimeout(() => setPreviewImage(draft.profileImage), 500);
+        return () => clearTimeout(timer);
+    }, [draft.profileImage]);
+
+    const setField = (key, value) => setDraft(current => ({ ...current, [key]: value }));
+
+    const syncFromAuth = async () => {
+        if (!admin.userId) return;
+        setAuthSyncing(true);
+        onError('');
+        try {
+            const res = await authApi.get(`/api/user/users/${admin.userId}`);
+            const user = res.data?.user || res.data || {};
+            setDraft(current => ({
+                ...current,
+                firstName: user.name ?? current.firstName,
+                lastName: user.name ? '' : current.lastName,
+                email: user.email ?? current.email,
+                phone: user.phone ?? current.phone,
+                profileImage: user.profileImageUrl ?? current.profileImage,
+            }));
+        } catch (err) {
+            onError(err.response?.data?.message || 'Failed to fetch user details from the auth app.');
+        } finally {
+            setAuthSyncing(false);
+        }
+    };
+
+    const saveAdmin = async () => {
+        setSaving(true);
+        onError('');
+        try {
+            await api.patch('/api/ui/admins/profile', {
+                acctId,
+                chatbotAdminId: admin.chatbotAdminId,
+                firstName: draft.firstName,
+                lastName: draft.lastName,
+                email: draft.email,
+                phone: draft.phone,
+                profileImage: draft.profileImage,
+            });
+
+            const levelChanged = draft.accessLevel !== admin.accessLevel;
+            if (isSuperadmin && levelChanged) {
+                await api.patch('/api/ui/admins/access-level', {
+                    acctId,
+                    chatbotAdminId: admin.chatbotAdminId,
+                    accessLevel: draft.accessLevel,
+                });
+            }
+
+            onSaved(admin._id, {
+                firstName: draft.firstName,
+                lastName: draft.lastName,
+                email: draft.email,
+                phone: draft.phone,
+                profileImage: draft.profileImage,
+                ...(isSuperadmin && levelChanged ? { accessLevel: draft.accessLevel } : {}),
+            });
+            onClose();
+        } catch (err) {
+            onError(err.response?.data?.message || 'Failed to update admin.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => !saving && !authSyncing && onClose()}>
+            <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-96 max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between mb-4">
+                    <div>
+                        <h3 className="ds-h6 text-gray-800">Edit Admin</h3>
+                        <p className="ds-caption text-gray-500">{fullName(admin)}</p>
+                    </div>
+                    <Tooltip content={admin.userId ? 'Pull name, email, phone & picture from the auth app' : 'No linked user to sync'} placement="left">
+                        <Button type="button" variant="secondary" size="sm" onClick={syncFromAuth} disabled={saving || !admin.userId} loading={authSyncing}>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            {authSyncing ? 'Syncing...' : 'Sync from auth'}
+                        </Button>
+                    </Tooltip>
+                </div>
+
+                <div className="flex items-center gap-3 mb-4">
+                    {previewImage ? (
+                        <img key={previewImage} src={previewImage} alt="" loading="lazy" decoding="async" className="w-12 h-12 rounded-full object-cover border border-gray-200" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                    ) : (
+                        <span className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: getAvatarColor(draft.firstName || 'A') }}>
+                            {(draft.firstName || '?').charAt(0).toUpperCase()}
+                        </span>
+                    )}
+                    <div className="flex-1">
+                        <label className="block text-[11px] font-semibold text-gray-500 mb-1">Profile Picture URL</label>
+                        <input className="ds-input w-full text-xs" value={draft.profileImage} onChange={(e) => setField('profileImage', e.target.value)} placeholder="https://..." disabled={saving} />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                        <label className="block text-[11px] font-semibold text-gray-500 mb-1">First Name</label>
+                        <input className="ds-input w-full text-xs" value={draft.firstName} onChange={(e) => setField('firstName', e.target.value)} disabled={saving} />
+                    </div>
+                    <div>
+                        <label className="block text-[11px] font-semibold text-gray-500 mb-1">Last Name</label>
+                        <input className="ds-input w-full text-xs" value={draft.lastName} onChange={(e) => setField('lastName', e.target.value)} disabled={saving} />
+                    </div>
+                </div>
+                <div className="mb-3">
+                    <label className="block text-[11px] font-semibold text-gray-500 mb-1">Email</label>
+                    <input className="ds-input w-full text-xs" type="email" value={draft.email} onChange={(e) => setField('email', e.target.value)} disabled={saving} />
+                </div>
+                <div className="mb-3">
+                    <label className="block text-[11px] font-semibold text-gray-500 mb-1">Phone</label>
+                    <input className="ds-input w-full text-xs" value={draft.phone} onChange={(e) => setField('phone', e.target.value)} disabled={saving} />
+                </div>
+
+                <div className="mb-4">
+                    <label className="block text-[11px] font-semibold text-gray-500 mb-1">Access Level</label>
+                    {isSuperadmin ? (
+                        <AccessLevelSelect roles={roles} value={draft.accessLevel} onChange={(value) => setField('accessLevel', value)} disabled={saving} />
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${(ROLE_COLORS[draft.accessLevel] || ROLE_COLORS.admin).bg} ${(ROLE_COLORS[draft.accessLevel] || ROLE_COLORS.admin).text}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${(ROLE_COLORS[draft.accessLevel] || ROLE_COLORS.admin).dot}`} />
+                                {(roles.find(role => role.key === draft.accessLevel)?.label) || draft.accessLevel}
+                            </span>
+                            <span className="text-[10px] text-gray-400">Only a super admin can change rights</span>
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex justify-end gap-2">
+                    <Button type="button" variant="secondary" scheme="primary" size="sm" onClick={onClose} disabled={saving || authSyncing}>Cancel</Button>
+                    <Button type="button" variant="primary" size="sm" onClick={saveAdmin} loading={saving} disabled={authSyncing}>Save</Button>
+                </div>
+            </div>
         </div>
     );
 };
@@ -164,6 +395,8 @@ const AdminTab = ({ acctId }) => {
     const [sortField, setSortField] = useState('');
     const [sortOrder, setSortOrder] = useState('asc');
     const filterTimerRef = useRef(null);
+    const copyTimerRef = useRef(null);
+    const requestRef = useRef({ controller: null, generation: 0 });
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize] = useState(20);
     const [totalPages, setTotalPages] = useState(1);
@@ -172,32 +405,42 @@ const AdminTab = ({ acctId }) => {
     const [currentAccessLevel, setCurrentAccessLevel] = useState(null);
     const [roles, setRoles] = useState([]);
     const [editingAdmin, setEditingAdmin] = useState(null);
-    const [editForm, setEditForm] = useState(EMPTY_FORM);
-    const [saving, setSaving] = useState(false);
-    const [authSyncing, setAuthSyncing] = useState(false);
     const [copiedIdentifier, setCopiedIdentifier] = useState('');
 
     const isSuperadmin = currentAccessLevel === 'superadmin';
 
-    const copyIdentifier = async (value) => {
+    const copyIdentifier = useCallback(async (value) => {
         try {
             await navigator.clipboard.writeText(String(value));
             setCopiedIdentifier(String(value));
-            setTimeout(() => setCopiedIdentifier(current => current === String(value) ? '' : current), 2000);
+            if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+            copyTimerRef.current = setTimeout(() => setCopiedIdentifier(current => current === String(value) ? '' : current), 2000);
         } catch {
             setError('Failed to copy the admin identifier.');
         }
-    };
+    }, []);
 
     const loadAdmins = useCallback(async (endpoint, filterParams = {}, sortBy = '', order = 'asc', page = 1, limit = 20) => {
-        if (!acctId) return;
+        requestRef.current.controller?.abort();
+        const controller = new AbortController();
+        const generation = requestRef.current.generation + 1;
+        requestRef.current = { controller, generation };
+
+        if (!acctId) {
+            setLoading(false);
+            setSyncing(false);
+            return;
+        }
         const setBusy = endpoint === '/api/ui/admins' ? setSyncing : setLoading;
+        setLoading(false);
+        setSyncing(false);
         setBusy(true);
         setError('');
         try {
             const params = { acctId, page, limit, ...filterParams };
             if (sortBy) { params.sortBy = sortBy; params.sortOrder = order; }
-            const response = await api.get(endpoint, { params });
+            const response = await api.get(endpoint, { params, signal: controller.signal });
+            if (requestRef.current.generation !== generation) return;
             const data = response.data;
             const list = Array.isArray(data) ? data : (data.admins || data.data || []);
             const pagination = data.pagination || null;
@@ -207,9 +450,11 @@ const AdminTab = ({ acctId }) => {
             setTotalPages(pagination?.pages ?? 1);
             setCurrentPage(pagination?.page ?? page);
         } catch (err) {
+            if (controller.signal.aborted || err.code === 'ERR_CANCELED') return;
+            if (requestRef.current.generation !== generation) return;
             setError(err.response?.data?.message || err.message || 'Failed to load admins.');
         } finally {
-            setBusy(false);
+            if (requestRef.current.generation === generation) setBusy(false);
         }
     }, [acctId]);
 
@@ -225,12 +470,23 @@ const AdminTab = ({ acctId }) => {
         loadAdmins('/api/ui/admins/list', buildActiveFilters(), sortField, sortOrder, currentPage, pageSize);
     }, [loadAdmins, appliedFilters, sortField, sortOrder, currentPage, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    useEffect(() => () => {
+        requestRef.current.controller?.abort();
+        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    }, []);
+
+    useEffect(() => () => {
+        if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+    }, [acctId]);
+
     // Load roles once for the edit dropdown
     useEffect(() => {
         if (!acctId) return;
-        api.get('/api/ui/roles', { params: { acctId } })
+        const controller = new AbortController();
+        api.get('/api/ui/roles', { params: { acctId }, signal: controller.signal })
             .then((res) => setRoles(res.data?.roles || []))
-            .catch(() => setRoles([]));
+            .catch((err) => { if (err.code !== 'ERR_CANCELED') setRoles([]); });
+        return () => controller.abort();
     }, [acctId]);
 
     const syncAdmins = useCallback(() => {
@@ -241,6 +497,7 @@ const AdminTab = ({ acctId }) => {
         setFilters(prev => ({ ...prev, [col]: val }));
         if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
         filterTimerRef.current = setTimeout(() => {
+            filterTimerRef.current = null;
             setCurrentPage(1);
             setAppliedFilters(prev => {
                 const updated = { ...prev };
@@ -264,87 +521,11 @@ const AdminTab = ({ acctId }) => {
         if (page >= 1 && page <= totalPages) setCurrentPage(page);
     };
 
-    const openEdit = (admin) => {
-        setEditingAdmin(admin);
-        setEditForm({
-            firstName: admin.firstName || '',
-            lastName: admin.lastName || '',
-            email: admin.email || '',
-            phone: admin.phone || '',
-            profileImage: admin.profileImage || '',
-            accessLevel: admin.accessLevel || 'admin',
-        });
-    };
-
-    const setField = (key, val) => setEditForm(prev => ({ ...prev, [key]: val }));
-
-    // Pull fresh name/email/phone/picture from the auth app by the admin's userId and
-    // persist them onto the admin record (req: sync admin details from the auth app).
-    const syncFromAuth = async () => {
-        if (!editingAdmin?.userId) return;
-        setAuthSyncing(true);
-        setError('');
-        try {
-            const res = await authApi.get(`/api/user/users/${editingAdmin.userId}`);
-            const u = res.data?.user || res.data || {};
-            // Full name lives in a single field on the auth profile → store it in firstName
-            setEditForm(prev => ({
-                ...prev,
-                firstName: u.name ?? prev.firstName,
-                lastName: u.name ? '' : prev.lastName,
-                email: u.email ?? prev.email,
-                phone: u.phone ?? prev.phone,
-                profileImage: u.profileImageUrl ?? prev.profileImage,
-            }));
-        } catch (err) {
-            setError(err.response?.data?.message || 'Failed to fetch user details from the auth app.');
-        } finally {
-            setAuthSyncing(false);
-        }
-    };
-
-    const saveAdmin = async () => {
-        if (!editingAdmin) return;
-        setSaving(true);
-        setError('');
-        try {
-            // Profile fields (everyone may edit their own; superadmins may edit anyone)
-            await api.patch('/api/ui/admins/profile', {
-                acctId,
-                chatbotAdminId: editingAdmin.chatbotAdminId,
-                firstName: editForm.firstName,
-                lastName: editForm.lastName,
-                email: editForm.email,
-                phone: editForm.phone,
-                profileImage: editForm.profileImage,
-            });
-
-            // Access level — superadmin only, and only when it actually changed
-            const levelChanged = editForm.accessLevel !== editingAdmin.accessLevel;
-            if (isSuperadmin && levelChanged) {
-                await api.patch('/api/ui/admins/access-level', {
-                    acctId,
-                    chatbotAdminId: editingAdmin.chatbotAdminId,
-                    accessLevel: editForm.accessLevel,
-                });
-            }
-
-            const patch = {
-                firstName: editForm.firstName,
-                lastName: editForm.lastName,
-                email: editForm.email,
-                phone: editForm.phone,
-                profileImage: editForm.profileImage,
-                ...(isSuperadmin && levelChanged ? { accessLevel: editForm.accessLevel } : {}),
-            };
-            setAdmins(prev => prev.map(a => (a._id === editingAdmin._id ? { ...a, ...patch } : a)));
-            setEditingAdmin(null);
-        } catch (err) {
-            setError(err.response?.data?.message || 'Failed to update admin.');
-        } finally {
-            setSaving(false);
-        }
-    };
+    const openEdit = useCallback((admin) => setEditingAdmin(admin), []);
+    const closeEdit = useCallback(() => setEditingAdmin(null), []);
+    const handleAdminSaved = useCallback((adminId, patch) => {
+        setAdmins(current => current.map(admin => (admin._id === adminId ? { ...admin, ...patch } : admin)));
+    }, []);
 
     const renderSortIcon = (col) => {
         if (sortField !== col) {
@@ -361,47 +542,6 @@ const AdminTab = ({ acctId }) => {
         );
     };
 
-    const renderCell = (admin, col) => {
-        if (col.type === 'name') {
-            const name = fullName(admin);
-            const display = admin.firstName || name;
-            return (
-                <div className="flex items-center justify-start gap-1.5">
-                    {admin.profileImage ? (
-                        <img src={admin.profileImage} alt={display} className="w-5 h-5 rounded-full object-cover border border-gray-200 flex-shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
-                    ) : (
-                        <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-[9px] select-none" style={{ backgroundColor: getAvatarColor(name) }}>
-                            {name && name !== '-' ? name.charAt(0).toUpperCase() : '?'}
-                        </span>
-                    )}
-                    <span>{display}</span>
-                </div>
-            );
-        }
-        if (col.type === 'badge') {
-            const isSuper = admin.accessLevel === 'superadmin';
-            return (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${isSuper ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
-                    {isSuper ? 'Super Admin' : 'Admin'}
-                </span>
-            );
-        }
-        if (col.type === 'identifiers') {
-            return (
-                <AssignmentIdentifiers admin={admin} copied={[
-                    admin.chatbotAdminId,
-                    admin._id,
-                    admin.userId,
-                ].some(value => copiedIdentifier === String(value))} onCopy={copyIdentifier} />
-            );
-        }
-        if (col.type === 'date') {
-            return admin[col.key] ? new Date(admin[col.key]).toLocaleDateString() : '-';
-        }
-        const v = admin[col.key];
-        return v != null && v !== '' ? String(v) : '-';
-    };
-
     // Everyone gets an edit action (non-superadmins only ever see their own row);
     // the access-level field inside the editor is what's gated to superadmins.
     const colCount = COLUMNS.length + 1;
@@ -410,11 +550,15 @@ const AdminTab = ({ acctId }) => {
         <div className="h-full flex flex-col">
             <div className="mb-3 flex-shrink-0 flex justify-start gap-2">
                 <Tooltip content={syncing ? 'Syncing...' : 'Sync admins'} placement="top">
-                    <button
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        iconOnly
                         onClick={syncAdmins}
                         disabled={syncing || loading}
-                        className="group relative w-8 h-8 flex items-center justify-center bg-transparent rounded-lg hover:bg-indigo-50 transition-all duration-300 hover:scale-110 border border-gray-300 hover:border-indigo-400 focus:ring-1 focus:ring-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed"
                         title={syncing ? 'Syncing...' : 'Sync admins'}
+                        aria-label={syncing ? 'Syncing admins' : 'Sync admins'}
                     >
                         <svg
                             className={`w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors ${syncing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`}
@@ -422,7 +566,7 @@ const AdminTab = ({ acctId }) => {
                         >
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                    </button>
+                    </Button>
                 </Tooltip>
             </div>
 
@@ -463,20 +607,20 @@ const AdminTab = ({ acctId }) => {
                                                                 value={filters[col.key] || ''}
                                                                 onChange={(e) => handleFilterChange(col.key, e.target.value)}
                                                                 onClick={(e) => e.stopPropagation()}
-                                                                className="w-full px-2 py-1 text-[10px] bg-white border border-slate-200 text-slate-700 rounded-md outline-none focus:border-indigo-400"
+                                                                className="ds-input ds-input--sm w-full text-[10px]"
                                                             >
                                                                 <option value="">All</option>
                                                                 {roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                                                             </select>
                                                         ) : (
-                                                            <div className="relative rounded-md bg-slate-200/80 focus-within:bg-gradient-to-r focus-within:from-indigo-500 focus-within:via-violet-400 focus-within:to-indigo-500 p-[1px] transition-all duration-300 shadow-sm">
+                                                            <div>
                                                                 <input
                                                                     type="text"
                                                                     placeholder="Filter..."
                                                                     value={filters[col.key] || ''}
                                                                     onChange={(e) => handleFilterChange(col.key, e.target.value)}
                                                                     onClick={(e) => e.stopPropagation()}
-                                                                    className={`w-full px-2 py-1 text-[10px] bg-white/70 focus:bg-white text-slate-700 rounded-[5px] outline-none placeholder-slate-400 transition-all ${col.align === 'left' ? 'text-left' : 'text-center'}`}
+                                                                    className={`ds-input ds-input--sm w-full text-[10px] ${col.align === 'left' ? 'text-left' : 'text-center'}`}
                                                                 />
                                                             </div>
                                                         )}
@@ -520,25 +664,14 @@ const AdminTab = ({ acctId }) => {
                                 </tr>
                             ) : (
                                 admins.map((admin) => (
-                                    <tr key={admin._id} className="hover:bg-gray-50 transition-all duration-200">
-                                        {COLUMNS.map((col) => (
-                                            <td key={col.key} className={`px-3 py-2 whitespace-nowrap text-[11px] text-gray-900 font-medium ${col.align === 'left' ? 'text-left' : 'text-center'}`}>
-                                                {renderCell(admin, col)}
-                                            </td>
-                                        ))}
-                                        <td className="px-3 py-2 whitespace-nowrap text-center">
-                                            <Tooltip content="Edit admin" placement="top">
-                                                <button
-                                                    onClick={() => openEdit(admin)}
-                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                    </svg>
-                                                </button>
-                                            </Tooltip>
-                                        </td>
-                                    </tr>
+                                    <AdminRow
+                                        key={admin._id}
+                                        admin={admin}
+                                        copied={[admin.chatbotAdminId, admin._id, admin.userId]
+                                            .some(value => copiedIdentifier === String(value))}
+                                        onCopy={copyIdentifier}
+                                        onEdit={openEdit}
+                                    />
                                 ))
                             )}
                         </tbody>
@@ -552,135 +685,57 @@ const AdminTab = ({ acctId }) => {
                         <span className="font-bold text-indigo-700">{Math.min(currentPage * pageSize, totalRecords)}</span> of{' '}
                         <span className="font-bold text-indigo-700">{totalRecords}</span> results
                     </p>
-                    <nav className="relative z-0 inline-flex rounded shadow-sm -space-x-px" aria-label="Pagination">
-                        <button
+                    <nav className="relative inline-flex items-center gap-1" aria-label="Pagination">
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
                             onClick={() => goToPage(currentPage - 1)}
                             disabled={currentPage === 1}
-                            className="relative inline-flex items-center px-2 py-1 rounded-l border border-gray-300 bg-white text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                         >
                             Previous
-                        </button>
-                        {[...Array(totalPages)].map((_, index) => {
-                            const page = index + 1;
-                            if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
-                                return (
-                                    <button
-                                        key={page}
-                                        onClick={() => goToPage(page)}
-                                        className={`relative inline-flex items-center px-2 py-1 border text-xs font-medium transition-all ${currentPage === page
-                                            ? 'z-10 bg-gradient-to-b from-indigo-500 to-indigo-700 border-indigo-600 text-white shadow-lg shadow-indigo-500/30'
-                                            : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'}`}
-                                    >
-                                        {page}
-                                    </button>
-                                );
-                            } else if (page === currentPage - 2 || page === currentPage + 2) {
-                                return <span key={page} className="relative inline-flex items-center px-2 py-1 border border-gray-300 bg-white text-xs font-medium text-gray-700">...</span>;
-                            }
-                            return null;
-                        })}
-                        <button
+                        </Button>
+                        {buildPageTokens(totalPages, currentPage).map((token) => (
+                            typeof token === 'number' ? (
+                                <Button
+                                    type="button"
+                                    key={token}
+                                    variant={currentPage === token ? 'primary' : 'secondary'}
+                                    size="sm"
+                                    iconOnly
+                                    onClick={() => goToPage(token)}
+                                    aria-current={currentPage === token ? 'page' : undefined}
+                                >
+                                    {token}
+                                </Button>
+                            ) : (
+                                <span key={token} className="inline-flex h-8 items-center px-1 text-xs font-medium text-gray-500">...</span>
+                            )
+                        ))}
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
                             onClick={() => goToPage(currentPage + 1)}
                             disabled={currentPage === totalPages}
-                            className="relative inline-flex items-center px-2 py-1 rounded-r border border-gray-300 bg-white text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                         >
                             Next
-                        </button>
+                        </Button>
                     </nav>
                 </div>
             </div>
 
-            {/* Edit admin modal */}
             {editingAdmin && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => !saving && !authSyncing && setEditingAdmin(null)}>
-                    <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-96 max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-start justify-between mb-4">
-                            <div>
-                                <h3 className="text-sm font-bold text-gray-800">Edit Admin</h3>
-                                <p className="text-xs text-gray-500">{fullName(editingAdmin)}</p>
-                            </div>
-                            <Tooltip content={editingAdmin.userId ? 'Pull name, email, phone & picture from the auth app' : 'No linked user to sync'} placement="left">
-                                <button
-                                    type="button"
-                                    onClick={syncFromAuth}
-                                    disabled={saving || authSyncing || !editingAdmin.userId}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                    <svg className={`w-3.5 h-3.5 ${authSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                    {authSyncing ? 'Syncing…' : 'Sync from auth'}
-                                </button>
-                            </Tooltip>
-                        </div>
-
-                        {/* Avatar preview */}
-                        <div className="flex items-center gap-3 mb-4">
-                            {editForm.profileImage ? (
-                                <img src={editForm.profileImage} alt="" className="w-12 h-12 rounded-full object-cover border border-gray-200" onError={(e) => { e.target.style.display = 'none'; }} />
-                            ) : (
-                                <span className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: getAvatarColor(editForm.firstName || 'A') }}>
-                                    {(editForm.firstName || '?').charAt(0).toUpperCase()}
-                                </span>
-                            )}
-                            <div className="flex-1">
-                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Profile Picture URL</label>
-                                <input className="ds-input w-full text-xs" value={editForm.profileImage} onChange={(e) => setField('profileImage', e.target.value)} placeholder="https://…" disabled={saving} />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 mb-3">
-                            <div>
-                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">First Name</label>
-                                <input className="ds-input w-full text-xs" value={editForm.firstName} onChange={(e) => setField('firstName', e.target.value)} disabled={saving} />
-                            </div>
-                            <div>
-                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Last Name</label>
-                                <input className="ds-input w-full text-xs" value={editForm.lastName} onChange={(e) => setField('lastName', e.target.value)} disabled={saving} />
-                            </div>
-                        </div>
-                        <div className="mb-3">
-                            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Email</label>
-                            <input className="ds-input w-full text-xs" type="email" value={editForm.email} onChange={(e) => setField('email', e.target.value)} disabled={saving} />
-                        </div>
-                        <div className="mb-3">
-                            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Phone</label>
-                            <input className="ds-input w-full text-xs" value={editForm.phone} onChange={(e) => setField('phone', e.target.value)} disabled={saving} />
-                        </div>
-
-                        <div className="mb-4">
-                            <label className="block text-[11px] font-semibold text-gray-500 mb-1">Access Level</label>
-                            {isSuperadmin ? (
-                                <AccessLevelSelect roles={roles} value={editForm.accessLevel} onChange={(v) => setField('accessLevel', v)} disabled={saving} />
-                            ) : (
-                                <div className="flex items-center gap-2">
-                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${(ROLE_COLORS[editForm.accessLevel] || ROLE_COLORS.admin).bg} ${(ROLE_COLORS[editForm.accessLevel] || ROLE_COLORS.admin).text}`}>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${(ROLE_COLORS[editForm.accessLevel] || ROLE_COLORS.admin).dot}`} />
-                                        {(roles.find(r => r.key === editForm.accessLevel)?.label) || editForm.accessLevel}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400">Only a super admin can change rights</span>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-end gap-2">
-                            <button
-                                onClick={() => setEditingAdmin(null)}
-                                disabled={saving}
-                                className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-all disabled:opacity-50"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={saveAdmin}
-                                disabled={saving}
-                                className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-all disabled:opacity-50"
-                            >
-                                {saving ? 'Saving...' : 'Save'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <EditAdminDialog
+                    key={editingAdmin._id}
+                    acctId={acctId}
+                    admin={editingAdmin}
+                    isSuperadmin={isSuperadmin}
+                    roles={roles}
+                    onClose={closeEdit}
+                    onError={setError}
+                    onSaved={handleAdminSaved}
+                />
             )}
         </div>
     );

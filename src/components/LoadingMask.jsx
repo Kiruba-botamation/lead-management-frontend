@@ -1,6 +1,7 @@
 import React from 'react';
+import Button from './ui/Button';
 
-const LoadingMask = ({ loading, title = 'Loading...', message = 'Please wait while we process your request' }) => {
+const LoadingMask = ({ loading, title = 'Loading...', message = 'Please wait while we process your request', actionLabel, onAction }) => {
   if (!loading) return null;
 
   return (
@@ -14,6 +15,11 @@ const LoadingMask = ({ loading, title = 'Loading...', message = 'Please wait whi
           <span className="text-lg font-semibold text-gray-900">{title}</span>
           <p className="text-sm text-gray-600 mt-1">{message}</p>
         </div>
+        {actionLabel && onAction && (
+          <Button variant="secondary" scheme="danger" size="sm" onClick={onAction}>
+            {actionLabel}
+          </Button>
+        )}
       </div>
     </div>
   );

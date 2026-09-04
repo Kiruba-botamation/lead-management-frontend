@@ -14,7 +14,6 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import ExcelJS from 'exceljs';
 import api from '../api/axiosConfig';
 import { useAccount } from '../context/AccountContext';
 import { useAuth } from '../context/AuthContext';
@@ -30,6 +29,7 @@ import { Dropdown, DropdownItem } from './ui/Dropdown';
 import { activityApi } from '../api/notesApi';
 import { twoLetterColor, adminDisplayName, tint, ResponsibleSelect, StageSelect } from './leads/leadShared';
 import LeadsKanban from './leads/LeadsKanban';
+import { normalizeListResponse } from './leads/pagination';
 import {
     DndContext,
     DragOverlay,
@@ -608,8 +608,21 @@ const SortableColumnHeader = ({
         e.stopPropagation();
         const startX = e.clientX;
         const startW = thRef.current ? thRef.current.offsetWidth : (width || 120);
-        const onMove = (me) => onResize(field, Math.max(60, startW + me.clientX - startX));
+        let nextWidth = startW;
+        let frame = null;
+        const paint = () => {
+            frame = null;
+            if (!thRef.current) return;
+            thRef.current.style.width = `${nextWidth}px`;
+            thRef.current.style.minWidth = `${nextWidth}px`;
+        };
+        const onMove = (me) => {
+            nextWidth = Math.max(60, startW + me.clientX - startX);
+            if (frame == null) frame = requestAnimationFrame(paint);
+        };
         const onUp   = () => {
+            if (frame != null) cancelAnimationFrame(frame);
+            onResize(field, nextWidth);
             document.removeEventListener('pointermove', onMove);
             document.removeEventListener('pointerup', onUp);
         };
@@ -680,14 +693,15 @@ const DragOverlayColumnHeader = ({ field, label }) => (
 
 // ── Add/Edit lead form (right panel) ──────────────────────────────────────────
 
-const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditForm, onSave, onCancel, isSaving, admins, stages = [] }) => {
+const LeadFormPanel = React.memo(({ editLead, editFields, columnDefMap, initialForm, onSave, onCancel, isSaving, admins, stages = [] }) => {
+    const [draft, setDraft] = useState(initialForm);
     const isEditFormDirty = editLead
-        ? Object.keys(editForm).some(k => {
+        ? Object.keys(draft).some(k => {
             const orig = editLead[k] == null ? '' : String(editLead[k]);
-            const curr = editForm[k] == null ? '' : String(editForm[k]);
+            const curr = draft[k] == null ? '' : String(draft[k]);
             return curr !== orig;
         })
-        : Object.values(editForm).some(v => v !== '' && v !== null && v !== undefined);
+        : Object.values(draft).some(v => v !== '' && v !== null && v !== undefined);
 
     return (
         <div className="w-full sm:w-[calc(33.333%-0.5rem)] bg-white border border-gray-300 rounded-lg shadow-sm relative flex flex-col h-full overflow-hidden">
@@ -696,7 +710,7 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
                     {editLead ? 'Edit Lead' : 'Add New Lead'}
                 </h3>
                 <div className="flex items-center gap-2">
-                    <Button size="sm" onClick={onSave} disabled={isSaving || !isEditFormDirty} loading={isSaving}>
+                    <Button size="sm" onClick={() => onSave(draft)} disabled={isSaving || !isEditFormDirty} loading={isSaving}>
                         Save
                     </Button>
                     <Button size="sm" variant="secondary" scheme="primary" onClick={onCancel} disabled={isSaving}>
@@ -711,8 +725,8 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
                             <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-1.5">Assigned To</p>
                             <ResponsibleSelect
                                 admins={admins}
-                                value={editForm['responsible'] ?? ''}
-                                onChange={v => setEditForm(prev => ({ ...prev, responsible: v }))}
+                                value={draft.responsible ?? ''}
+                                onChange={v => setDraft(prev => ({ ...prev, responsible: v }))}
                                 disabled={isSaving}
                             />
                         </div>
@@ -722,8 +736,8 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
                             <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-1.5">Stage</p>
                             <StageSelect
                                 stages={stages}
-                                value={editForm['stage'] ?? ''}
-                                onChange={v => setEditForm(prev => ({ ...prev, stage: v }))}
+                                value={draft.stage ?? ''}
+                                onChange={v => setDraft(prev => ({ ...prev, stage: v }))}
                                 disabled={isSaving}
                             />
                         </div>
@@ -744,8 +758,8 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
                                 </label>
                                 <FormFieldInput
                                     type={type}
-                                    value={editForm[fieldKey] ?? ''}
-                                    onChange={v => setEditForm(prev => ({ ...prev, [fieldKey]: v }))}
+                                    value={draft[fieldKey] ?? ''}
+                                    onChange={v => setDraft(prev => ({ ...prev, [fieldKey]: v }))}
                                     disabled={isSaving}
                                 />
                             </div>
@@ -755,7 +769,7 @@ const LeadFormPanel = ({ editLead, editFields, columnDefMap, editForm, setEditFo
             </div>
         </div>
     );
-};
+});
 
 const FormFieldInput = ({ type, value, onChange, disabled }) => {
     const cls = 'ds-input ds-input--sm';
@@ -798,7 +812,7 @@ const ResponsibleFilterDropdown = ({ admins, value, onChange }) => {
     const renderAvatar = (a) => {
         const name = adminDisplayName(a);
         return a.profileImage
-            ? <img src={a.profileImage} alt="" className="w-4 h-4 rounded-full object-cover border border-gray-200" onError={e => { e.target.style.display = 'none'; }} />
+            ? <img src={a.profileImage} alt="" loading="lazy" decoding="async" className="w-4 h-4 rounded-full object-cover border border-gray-200" onError={e => { e.target.style.display = 'none'; }} />
             : <span className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold text-[8px] select-none shrink-0" style={{ backgroundColor: twoLetterColor(name) }}>{name.charAt(0).toUpperCase()}</span>;
     };
 
@@ -1043,6 +1057,14 @@ const LeadsGrid = () => {
     const [loading, setLoading]         = useState(true);
     const [error, setError]             = useState(null);
     const [isExporting, setIsExporting] = useState(false);
+    const [activeExportId, setActiveExportId] = useState(null);
+    const exportAbortRef = useRef(null);
+
+    useEffect(() => () => {
+        const controller = exportAbortRef.current;
+        exportAbortRef.current = null;
+        controller?.abort();
+    }, []);
 
     // ── Column definitions (from collection — separate from lead data) ──────────
     /**
@@ -1063,8 +1085,19 @@ const LeadsGrid = () => {
     // ── Pagination ────────────────────────────────────────────────────────────
     const [currentPage,   setCurrentPage]   = useState(1);
     const [pageSize,      setPageSize]       = useState(50);
-    const [totalPages,    setTotalPages]     = useState(0);
-    const [totalRecords,  setTotalRecords]   = useState(0);
+    const [currentCursor, setCurrentCursor]  = useState(null);
+    const [cursorHistory, setCursorHistory]  = useState([]);
+    const [nextCursor,    setNextCursor]     = useState(null);
+    const [hasNextPage,   setHasNextPage]    = useState(false);
+    const [totalRecords,  setTotalRecords]   = useState(null);
+
+    const resetPagination = useCallback(() => {
+        setCurrentPage(1);
+        setCurrentCursor(null);
+        setCursorHistory([]);
+        setNextCursor(null);
+        setHasNextPage(false);
+    }, []);
 
     // ── Sorting ───────────────────────────────────────────────────────────────
     const [sortField,  setSortField]  = useState('');
@@ -1092,6 +1125,14 @@ const LeadsGrid = () => {
     // fetchLeads can check it in the same effects phase and bail without fetching
     // stale data (prevents the duplicate-fetch race on collection switch).
     const columnDefsLoadingRef = useRef(false);
+    const collectionsRequestRef = useRef(null);
+    const fieldsRequestRef = useRef(null);
+    const leadsRequestRef = useRef(null);
+    const countsRequestRef = useRef(null);
+    const collectionsGenerationRef = useRef(0);
+    const fieldsGenerationRef = useRef(0);
+    const leadsGenerationRef = useRef(0);
+    const countsGenerationRef = useRef(0);
 
     // ── Grid viewport width (for even-spreading columns) ──────────────────────
     const gridScrollRef = useRef(null);
@@ -1134,10 +1175,7 @@ const LeadsGrid = () => {
     const [reminderCounts,  setReminderCounts]  = useState({}); // { [leadId]: number }
 
     // ── View mode: 'grid' (default) | 'kanban' ────────────────────────────────
-    // The Kanban is lazy-mounted on first switch and then kept mounted so toggling
-    // back and forth is instant (its per-stage data survives the toggle).
     const [viewMode,      setViewMode]      = useState('grid');
-    const [kanbanMounted, setKanbanMounted] = useState(false);
     // Bumped whenever a lead is created/updated/deleted from the shared panels so
     // the Kanban knows to refresh.
     const [leadsVersion,  setLeadsVersion]  = useState(0);
@@ -1149,11 +1187,9 @@ const LeadsGrid = () => {
         const saved = loadNested('view', acctId, selectedCollection);
         const next  = saved === 'kanban' ? 'kanban' : 'grid';
         setViewMode(next);
-        if (next === 'kanban') setKanbanMounted(true);
     }, [acctId, selectedCollection]);
 
     const setView = (mode) => {
-        if (mode === 'kanban') setKanbanMounted(true);
         saveNested('view', acctId, selectedCollection, mode === 'grid' ? null : 'kanban');
         setViewMode(mode);
     };
@@ -1173,11 +1209,21 @@ const LeadsGrid = () => {
     useEffect(() => {
         const el = gridScrollRef.current;
         if (!el) return;
-        const update = () => setGridViewportW(el.clientWidth);
+        let frame = null;
+        const update = () => {
+            if (frame != null) return;
+            frame = requestAnimationFrame(() => {
+                frame = null;
+                setGridViewportW(el.clientWidth);
+            });
+        };
         update();
         const ro = new ResizeObserver(update);
         ro.observe(el);
-        return () => ro.disconnect();
+        return () => {
+            ro.disconnect();
+            if (frame != null) cancelAnimationFrame(frame);
+        };
     }, [viewMode, isEditFormVisible, activityLead, isGridVisible]);
 
     // ── Responsive: hide grid when edit form open on small screens ────────────
@@ -1190,12 +1236,17 @@ const LeadsGrid = () => {
 
     // ── CALL 1: Fetch collection list ───────────────────────────────────────────
     const fetchCollections = useCallback(async () => {
+        collectionsRequestRef.current?.abort();
+        const generation = ++collectionsGenerationRef.current;
         if (!acctId) return;
+        const controller = new AbortController();
+        collectionsRequestRef.current = controller;
         setCollectionLoading(true);
         setCollectionsReady(false);
-        setCurrentPage(1);
+        resetPagination();
         try {
-            const res  = await api.get('/api/ui/leads/collections', { params: { acctId } });
+            const res  = await api.get('/api/ui/leads/collections', { params: { acctId }, signal: controller.signal });
+            if (generation !== collectionsGenerationRef.current) return;
             const list = (res.data?.data || []).filter(c => c?._id && c?.collectionName);
             setCollections(list);
 
@@ -1213,24 +1264,32 @@ const LeadsGrid = () => {
                 navigate(`${window.location.pathname}?${params.toString()}`, { replace: true });
             }
             setCollectionsReady(true);
-        } catch {
-            setCollectionsReady(true);
+        } catch (err) {
+            if (generation === collectionsGenerationRef.current && err.code !== 'ERR_CANCELED' && err.name !== 'CanceledError') setCollectionsReady(true);
         } finally {
-            setCollectionLoading(false);
+            if (generation === collectionsGenerationRef.current) setCollectionLoading(false);
         }
-    }, [acctId]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [acctId, resetPagination]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchCollections(); }, [fetchCollections]);
 
     // ── CALL 2: Fetch column definitions for selected collection ────────────────
     const fetchColumnDefs = useCallback(async (collectionId) => {
-        if (!collectionId || !acctId) return;
+        fieldsRequestRef.current?.abort();
+        const generation = ++fieldsGenerationRef.current;
+        if (!collectionId || !acctId) {
+            columnDefsLoadingRef.current = false;
+            return;
+        }
+        const controller = new AbortController();
+        fieldsRequestRef.current = controller;
         // Mark loading synchronously (before any await) so fetchLeads can check
         // the ref in the same effects phase and avoid a stale duplicate fetch.
         columnDefsLoadingRef.current = true;
         setColumnDefsReady(false);
         try {
-            const res  = await api.get(`/api/ui/leads/collections/${collectionId}/fields`, { params: { acctId } });
+            const res  = await api.get(`/api/ui/leads/collections/${collectionId}/fields`, { params: { acctId }, signal: controller.signal });
+            if (generation !== fieldsGenerationRef.current) return;
             const data = res.data?.data;
             if (!data) return;
 
@@ -1266,25 +1325,30 @@ const LeadsGrid = () => {
             setFilters(initFilters);
 
             setColumnDefsReady(true);
-        } catch {
-            setColumnDefsReady(true);
+        } catch (err) {
+            if (generation === fieldsGenerationRef.current && err.code !== 'ERR_CANCELED' && err.name !== 'CanceledError') setColumnDefsReady(true);
         } finally {
-            columnDefsLoadingRef.current = false;
+            if (generation === fieldsGenerationRef.current) columnDefsLoadingRef.current = false;
         }
     }, [acctId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Trigger column defs fetch when collection selection changes
     useEffect(() => {
-        if (selectedCollection) {
-            fetchColumnDefs(selectedCollection);
-            setColWidths({});  // reset column widths on collection change
-        }
+        fetchColumnDefs(selectedCollection);
+        if (selectedCollection) setColWidths({});  // reset column widths on collection change
     }, [selectedCollection, fetchColumnDefs]);
 
     // ── CALL 3: Fetch lead data ───────────────────────────────────────────────
     const fetchLeads = useCallback(async () => {
+        leadsRequestRef.current?.abort();
+        countsRequestRef.current?.abort();
+        const generation = ++leadsGenerationRef.current;
+        countsGenerationRef.current += 1;
         // Only fetch for the grid view; kanban manages its own per-stage fetches.
-        if (viewMode !== 'grid') { setLoading(false); return; }
+        if (viewMode !== 'grid') {
+            setLoading(false);
+            return;
+        }
 
         // columnDefsLoadingRef is set synchronously in fetchColumnDefs before any
         // await, preventing a duplicate fetch that would otherwise start before
@@ -1298,12 +1362,14 @@ const LeadsGrid = () => {
             if (isAccountLinked && collectionsReady && !selectedCollection) {
                 setLeads([]);
                 setTotalRecords(0);
-                setTotalPages(0);
+                setHasNextPage(false);
                 setLoading(false);
             }
             return;
         }
 
+        const controller = new AbortController();
+        leadsRequestRef.current = controller;
         setLoading(true);
         setError(null);
         try {
@@ -1319,23 +1385,31 @@ const LeadsGrid = () => {
             }
 
             const params = {
-                page:     currentPage,
                 limit:    pageSize,
                 acctId,
+                ...(currentCursor != null && { cursor: currentCursor }),
                 ...(selectedCollection  && { collectionId: selectedCollection }),
                 ...(sortField         && { sortBy: sortField, sortOrder }),
                 ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) }),
                 ...(isSuperAdmin && responsibleFilter && { responsibleFilter })
             };
 
-            const res = await api.get('/api/ui/leads', { params });
-            const newLeads = res.data.data || [];
+            const res = await api.get('/api/ui/leads', { params, signal: controller.signal });
+            if (generation !== leadsGenerationRef.current) return;
+            const normalized = normalizeListResponse(res);
+            const newLeads = normalized.items;
             setLeads(newLeads);
-            setTotalRecords(res.data.pagination?.total || 0);
+            setTotalRecords(normalized.total);
+            setNextCursor(normalized.nextCursor);
+            setHasNextPage(normalized.hasNext);
             // Fetch per-lead activity counts (non-blocking — 1 combined call, silent on error)
             if (newLeads.length && acctId) {
                 const leadIds = newLeads.map(l => l._id);
-                activityApi.batchCounts(leadIds, acctId).then(r => {
+                const countsController = new AbortController();
+                countsRequestRef.current = countsController;
+                const countsGeneration = ++countsGenerationRef.current;
+                activityApi.batchCounts(leadIds, acctId, { signal: countsController.signal }).then(r => {
+                    if (countsGeneration !== countsGenerationRef.current || generation !== leadsGenerationRef.current) return;
                     const d = r.data?.data || {};
                     setNoteCounts(d.notes || {});
                     setReminderCounts(d.reminders || {});
@@ -1344,16 +1418,23 @@ const LeadsGrid = () => {
                 setNoteCounts({});
                 setReminderCounts({});
             }
-            setTotalPages(res.data.pagination?.pages  || 1);
-            setCurrentPage(res.data.pagination?.page  || 1);
         } catch (err) {
-            setError(err.message || 'Failed to fetch leads');
+            if (generation === leadsGenerationRef.current && err.code !== 'ERR_CANCELED' && err.name !== 'CanceledError') {
+                setError(err.message || 'Failed to fetch leads');
+            }
         } finally {
-            setLoading(false);
+            if (generation === leadsGenerationRef.current) setLoading(false);
         }
-    }, [viewMode, currentPage, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [viewMode, currentPage, currentCursor, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
+
+    useEffect(() => () => {
+        collectionsRequestRef.current?.abort();
+        fieldsRequestRef.current?.abort();
+        leadsRequestRef.current?.abort();
+        countsRequestRef.current?.abort();
+    }, []);
 
     // ── Deep-link: open a specific lead's activity panel via URL params ───────
     // Triggered by push notification clicks and bell notification item clicks.
@@ -1396,7 +1477,7 @@ const LeadsGrid = () => {
         setStageFilter('');  // stages are collection-specific
         setNoteCounts({});
         setReminderCounts({});
-        setCurrentPage(1);
+        resetPagination();
         // Column defs + filters will reload via the selectedCollection effect
     };
 
@@ -1441,7 +1522,7 @@ const LeadsGrid = () => {
             setSortField(field);
             setSortOrder('asc');
         }
-        setCurrentPage(1);
+        resetPagination();
     };
 
     const renderSortIcon = (field) => {
@@ -1477,8 +1558,8 @@ const LeadsGrid = () => {
             saveNested('filters', acctId, selectedCollection, Object.keys(toSave).length > 0 ? toSave : null);
             return updated;
         });
-        setCurrentPage(1);
-    }, [acctId, selectedCollection]);
+        resetPagination();
+    }, [acctId, selectedCollection, resetPagination]);
 
     const handleApplyFilters = useCallback(() => {
         for (const [field, value] of Object.entries(filters)) {
@@ -1498,7 +1579,7 @@ const LeadsGrid = () => {
         });
         setResponsibleFilter('');
         setStageFilter('');
-        setCurrentPage(1);
+        resetPagination();
     };
 
     const activeFilterCount = Object.entries(appliedFilters)
@@ -1581,11 +1662,11 @@ const LeadsGrid = () => {
         setIsEditFormVisible(true);
     };
 
-    const handleEditSave = async () => {
+    const handleEditSave = async (draft) => {
         setIsSaving(true);
         try {
             if (editLead) {
-                await api.put(`/api/ui/leads/${editLead._id}`, editForm, { params: { acctId, acctNo } });
+                await api.put(`/api/ui/leads/${editLead._id}`, draft, { params: { acctId, acctNo } });
                 showSuccess('Lead updated successfully.');
             } else {
                 const activeCat    = collections.find(c => c._id === selectedCollection);
@@ -1593,7 +1674,7 @@ const LeadsGrid = () => {
                 const url          = collectionName
                     ? `/api/ui/leads/${encodeURIComponent(collectionName)}`
                     : '/api/ui/leads';
-                await api.post(url, { data: editForm }, { params: { acctId } });
+                await api.post(url, { data: draft }, { params: { acctId } });
                 showSuccess('Lead created successfully.');
             }
             setIsEditFormVisible(false);
@@ -1650,68 +1731,101 @@ const LeadsGrid = () => {
 
 
     // ── Pagination ────────────────────────────────────────────────────────────
-    const goToPage = (page) => {
-        if (page >= 1 && page <= totalPages) setCurrentPage(page);
+    const goToNextPage = () => {
+        if (!hasNextPage || loading) return;
+        setCursorHistory(prev => [...prev, { cursor: currentCursor, page: currentPage }]);
+        setCurrentCursor(nextCursor);
+        setCurrentPage(prev => prev + 1);
+    };
+
+    const goToPreviousPage = () => {
+        if (!cursorHistory.length || loading) return;
+        const previous = cursorHistory[cursorHistory.length - 1];
+        setCursorHistory(prev => prev.slice(0, -1));
+        setCurrentCursor(previous.cursor);
+        setCurrentPage(previous.page);
     };
 
 
-    // ── Export to Excel ───────────────────────────────────────────────────────
-    const handleExportExcel = async () => {
+    // ── Asynchronous CSV export ───────────────────────────────────────────────
+    const handleExport = async () => {
+        exportAbortRef.current?.abort();
+        const controller = new AbortController();
+        exportAbortRef.current = controller;
         setIsExporting(true);
         try {
             const activeFilters = {};
             for (const [k, v] of Object.entries(appliedFilters)) {
                 if (k !== 'collectionId' && isFilterActive(v)) activeFilters[k] = v;
             }
-            const params = {
-                limit:  100000,
-                acctId,
-                ...(selectedCollection && { collectionId: selectedCollection }),
-                ...(sortField        && { sortBy: sortField, sortOrder }),
-                ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) })
-            };
-
-            const res      = await api.get('/api/ui/leads', { params, timeout: 120000 });
-            const allLeads = res.data.data || [];
-
-            if (allLeads.length === 0) { showError('No data to export.'); return; }
-
             const exportFields = fields.length > 0
                 ? fields.filter(f => !EXCLUDE_FROM_GRID.has(f))
-                : Object.keys(allLeads[0]).filter(f => !EXCLUDE_FROM_GRID.has(f));
+                : columnDefs.map(definition => definition.field).filter(f => !EXCLUDE_FROM_GRID.has(f));
+            if (!selectedCollection || exportFields.length === 0) {
+                showError('Select a collection with exportable fields first.');
+                return;
+            }
 
-            const rows = allLeads.map(lead => {
-                const row = {};
-                exportFields.forEach(f => {
-                    const colDef = columnDefMap.get(f);
-                    const label  = colDef?.label || SYSTEM_LABELS[f] || f;
-                    row[label] = formatValue(colDef, lead[f]);
-                });
-                return row;
+            const createResponse = await api.post('/api/ui/exports', {
+                collectionId: selectedCollection,
+                fields: exportFields.map(field => ({
+                    field,
+                    label: columnDefMap.get(field)?.label || SYSTEM_LABELS[field] || field
+                })),
+                ...(sortField && { sortBy: sortField, sortOrder }),
+                ...(Object.keys(activeFilters).length > 0 && { fieldFilters: JSON.stringify(activeFilters) })
+            }, { params: { acctId }, signal: controller.signal });
+            const exportId = createResponse.data?.data?.id;
+            if (!exportId) throw new Error('The export could not be queued.');
+            setActiveExportId(exportId);
+            showSuccess('Export queued. It will download automatically when ready.');
+
+            let exportState = createResponse.data.data;
+            while (['queued', 'running'].includes(exportState.status)) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                const statusResponse = await api.get(`/api/ui/exports/${exportId}`, { params: { acctId }, signal: controller.signal });
+                exportState = statusResponse.data?.data;
+            }
+            if (exportState.status === 'cancelled') return;
+            if (exportState.status !== 'completed') {
+                throw new Error(exportState.error || 'Export failed.');
+            }
+
+            const download = await api.get(`/api/ui/exports/${exportId}/download`, {
+                params: { acctId }, responseType: 'blob', timeout: 120000, signal: controller.signal
             });
-
-            const workbook  = new ExcelJS.Workbook();
-            const worksheet = workbook.addWorksheet('Leads');
-            const headerKeys = Object.keys(rows[0] || {});
-            worksheet.columns = headerKeys.map(k => ({
-                header: k, key: k,
-                width: Math.max(k.length, ...rows.map(r => String(r[k] ?? '').length)) + 2
-            }));
-            rows.forEach(r => worksheet.addRow(r));
-
-            const fileName = `leads${activeFilterCount > 0 ? '_filtered' : ''}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-            const buffer   = await workbook.xlsx.writeBuffer();
-            const blob     = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const fileName = exportState.fileName || `leads_${new Date().toISOString().slice(0, 10)}.csv`;
+            const blob = download.data;
             const url      = URL.createObjectURL(blob);
             const a        = document.createElement('a');
             a.href = url; a.download = fileName;
             document.body.appendChild(a); a.click(); a.remove();
             URL.revokeObjectURL(url);
-            showSuccess(`Exported ${allLeads.length} lead(s) to ${fileName}`);
+            showSuccess(`Exported ${exportState.processedRows ?? 0} lead(s) to ${fileName}`);
         } catch (err) {
-            showError(err.message || 'Failed to export leads.');
+            if (!controller.signal.aborted && err?.response?.status !== 409) {
+                showError(err.response?.data?.message || err.message || 'Failed to export leads.');
+            }
         } finally {
+            if (exportAbortRef.current === controller) {
+                exportAbortRef.current = null;
+                setActiveExportId(null);
+                setIsExporting(false);
+            }
+        }
+    };
+
+    const cancelExport = async () => {
+        if (!activeExportId) return;
+        try {
+            await api.delete(`/api/ui/exports/${activeExportId}`, { params: { acctId } });
+            exportAbortRef.current?.abort();
+            exportAbortRef.current = null;
+            setActiveExportId(null);
             setIsExporting(false);
+            showSuccess('Export cancelled.');
+        } catch (err) {
+            showError(err.response?.data?.message || 'Unable to cancel export.');
         }
     };
 
@@ -1762,7 +1876,7 @@ const LeadsGrid = () => {
                         style={{ backgroundColor: tint(baseColor, 0.28) }}
                     >
                         {imgUrl ? (
-                            <img src={imgUrl} alt="" className="w-4 h-4 rounded-full object-cover border border-white/70" onError={e => { e.target.style.display = 'none'; }} />
+                            <img src={imgUrl} alt="" loading="lazy" decoding="async" className="w-4 h-4 rounded-full object-cover border border-white/70" onError={e => { e.target.style.display = 'none'; }} />
                         ) : (
                             <span className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold text-[8px] select-none" style={{ backgroundColor: baseColor }}>
                                 {name.charAt(0).toUpperCase()}
@@ -1829,7 +1943,13 @@ const LeadsGrid = () => {
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <div className="h-full w-full min-w-0 flex flex-col bg-gray-50 overflow-hidden relative">
-            <LoadingMask loading={isExporting} title="Exporting..." message="Please wait while we export your leads to Excel" />
+            <LoadingMask
+                loading={isExporting}
+                title="Preparing export..."
+                message="The server is creating a bounded CSV export in the background."
+                actionLabel={activeExportId ? 'Cancel export' : undefined}
+                onAction={activeExportId ? cancelExport : undefined}
+            />
             <NotificationComponent />
             <AppNavbar activePage="leads" firedCount={firedCount} setFiredCount={setFiredCount} />
 
@@ -1891,7 +2011,7 @@ const LeadsGrid = () => {
                                     <ResponsibleFilterDropdown
                                         admins={adminsList}
                                         value={responsibleFilter}
-                                        onChange={(v) => { setResponsibleFilter(v); setCurrentPage(1); }}
+                                        onChange={(v) => { setResponsibleFilter(v); resetPagination(); }}
                                     />
                                     <div className="w-px h-6 bg-gray-200 mx-1.5" />
                                 </>
@@ -1903,7 +2023,7 @@ const LeadsGrid = () => {
                                     <StageFilterDropdown
                                         stages={stages}
                                         value={stageFilter}
-                                        onChange={(v) => { setStageFilter(v); setCurrentPage(1); }}
+                                        onChange={(v) => { setStageFilter(v); resetPagination(); }}
                                     />
                                     <div className="w-px h-6 bg-gray-200 mx-1.5" />
                                 </>
@@ -1945,7 +2065,7 @@ const LeadsGrid = () => {
                             <div className="flex items-center gap-1.5">
                                 <Tooltip content={sortField ? `Clear sort: ${sortField} (${sortOrder})` : 'No active sort'} placement="top">
                                     <button
-                                        onClick={() => { setSortField(''); setSortOrder('asc'); setCurrentPage(1); }}
+                                        onClick={() => { setSortField(''); setSortOrder('asc'); resetPagination(); }}
                                         disabled={loading || !sortField}
                                         className={`group relative w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-300 hover:scale-110 border focus:ring-1 disabled:opacity-40 disabled:cursor-not-allowed ${sortField ? 'bg-orange-50 border-orange-400 focus:ring-orange-300' : 'bg-transparent border-gray-300 hover:bg-orange-50 hover:border-orange-400 focus:ring-orange-300'}`}
                                     >
@@ -2025,10 +2145,10 @@ const LeadsGrid = () => {
 
                             {/* Group 4: Output */}
                             <div className="flex items-center gap-1.5">
-                                <Tooltip content={isExporting ? 'Exporting...' : `Export ${totalRecords} lead(s) to Excel`} placement="top">
+                                <Tooltip content={isExporting ? 'Cancel export' : 'Export leads to CSV'} placement="top">
                                     <button
-                                        onClick={handleExportExcel}
-                                        disabled={isExporting || loading}
+                                        onClick={isExporting ? cancelExport : handleExport}
+                                        disabled={loading || (isExporting && !activeExportId)}
                                         className="group relative w-8 h-8 flex items-center justify-center bg-transparent rounded-lg hover:bg-emerald-50 transition-all duration-300 hover:scale-110 border border-gray-300 hover:border-emerald-500 focus:ring-1 focus:ring-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
                                         {isExporting ? (
@@ -2243,36 +2363,28 @@ const LeadsGrid = () => {
                                         <div className="flex-shrink-0 bg-gray-50 px-3 py-2 flex items-center justify-between border-t border-gray-200">
                                             <div className="hidden sm:flex flex-1 items-center justify-between">
                                                 <p className="text-xs text-gray-700 font-medium">
-                                                    Showing <span className="font-bold text-indigo-700">{(currentPage - 1) * pageSize + 1}</span> to{' '}
-                                                    <span className="font-bold text-indigo-700">{Math.min(currentPage * pageSize, totalRecords)}</span> of{' '}
-                                                    <span className="font-bold text-indigo-700">{totalRecords}</span>
+                                                    Page <span className="font-bold text-indigo-700">{currentPage}</span>
+                                                    {' · '}Showing <span className="font-bold text-indigo-700">{leads.length}</span> lead(s)
+                                                    {totalRecords != null && <>{' · '}<span className="font-bold text-indigo-700">{totalRecords}</span> total</>}
                                                 </p>
                                                 <nav className="inline-flex rounded shadow-sm -space-x-px">
-                                                    <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="inline-flex items-center px-2 py-1 rounded-l border border-indigo-200 bg-white text-xs text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">Previous</button>
-                                                    {[...Array(totalPages)].map((_, i) => {
-                                                        const p = i + 1;
-                                                        if (p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1)) {
-                                                            return (
-                                                                <button key={p} onClick={() => goToPage(p)} className={`inline-flex items-center px-2 py-1 border text-xs font-medium ${currentPage === p ? 'z-10 bg-gradient-to-b from-indigo-500 to-indigo-700 border-indigo-600 text-white' : 'bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}>{p}</button>
-                                                            );
-                                                        }
-                                                        if (p === currentPage - 2 || p === currentPage + 2) return <span key={p} className="inline-flex items-center px-2 py-1 border border-gray-300 bg-white text-xs text-gray-700">...</span>;
-                                                        return null;
-                                                    })}
-                                                    <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="inline-flex items-center px-2 py-1 rounded-r border border-indigo-200 bg-white text-xs text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
+                                                    <button onClick={goToPreviousPage} disabled={!cursorHistory.length || loading} className="inline-flex items-center px-2 py-1 rounded-l border border-indigo-200 bg-white text-xs text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">Previous</button>
+                                                    <span className="inline-flex items-center px-3 py-1 border-y border-indigo-200 bg-indigo-50 text-xs font-semibold text-indigo-700">{currentPage}</span>
+                                                    <button onClick={goToNextPage} disabled={!hasNextPage || loading} className="inline-flex items-center px-2 py-1 rounded-r border border-indigo-200 bg-white text-xs text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
                                                 </nav>
                                             </div>
                                             {/* Mobile pagination */}
                                             <div className="flex sm:hidden flex-1 justify-between">
-                                                <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="inline-flex items-center px-2 py-1 border border-indigo-200 text-xs rounded text-indigo-600 bg-white hover:bg-indigo-50 disabled:opacity-50">Previous</button>
-                                                <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="ml-2 inline-flex items-center px-2 py-1 border border-indigo-200 text-xs rounded text-indigo-600 bg-white hover:bg-indigo-50 disabled:opacity-50">Next</button>
+                                                <button onClick={goToPreviousPage} disabled={!cursorHistory.length || loading} className="inline-flex items-center px-2 py-1 border border-indigo-200 text-xs rounded text-indigo-600 bg-white hover:bg-indigo-50 disabled:opacity-50">Previous</button>
+                                                <span className="text-xs font-semibold text-indigo-700 self-center">Page {currentPage}</span>
+                                                <button onClick={goToNextPage} disabled={!hasNextPage || loading} className="ml-2 inline-flex items-center px-2 py-1 border border-indigo-200 text-xs rounded text-indigo-600 bg-white hover:bg-indigo-50 disabled:opacity-50">Next</button>
                                             </div>
                                         </div>
                                     </div>
                                   </div>
-                                  {/* KANBAN layer (lazy-mounted on first switch, then kept mounted) */}
-                                  {kanbanMounted && (
-                                    <div className={`${viewMode === 'kanban' ? 'flex view-enter-kanban' : 'hidden'} flex-col flex-1 min-h-0`}>
+                                  {/* Unmount the board when hidden so pages and requests are released. */}
+                                  {viewMode === 'kanban' && (
+                                    <div className="flex view-enter-kanban flex-col flex-1 min-h-0">
                                         <LeadsKanban
                                             acctId={acctId}
                                             acctNo={acctNo}
@@ -2296,7 +2408,7 @@ const LeadsGrid = () => {
                                             setNoteCounts={setNoteCounts}
                                             setReminderCounts={setReminderCounts}
                                             refreshKey={leadsVersion}
-                                            isActive={viewMode === 'kanban'}
+                                            isActive
                                             showSuccess={showSuccess}
                                             showError={showError}
                                         />
@@ -2308,11 +2420,11 @@ const LeadsGrid = () => {
                             {/* RIGHT — Add/Edit form */}
                             {isEditFormVisible && (
                                 <LeadFormPanel
+                                    key={editLead?._id || 'new-lead'}
                                     editLead={editLead}
                                     editFields={editFields}
                                     columnDefMap={columnDefMap}
-                                    editForm={editForm}
-                                    setEditForm={setEditForm}
+                                    initialForm={editForm}
                                     onSave={handleEditSave}
                                     onCancel={cancelEdit}
                                     isSaving={isSaving}

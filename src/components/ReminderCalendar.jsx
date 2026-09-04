@@ -12,7 +12,58 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
-import { remindersApi } from '../api/remindersApi';
+import api from '../api/axiosConfig';
+
+const CALENDAR_CACHE_TTL_MS = 15_000;
+const MAX_CALENDAR_CACHE_ENTRIES = 24;
+const calendarCache = new Map();
+const calendarRequests = new Map();
+
+function acquireCalendarRequest(acctId, start, end) {
+    const key = `${acctId}:${start}:${end}`;
+    const cached = calendarCache.get(key);
+    if (cached && Date.now() - cached.timestamp < CALENDAR_CACHE_TTL_MS) {
+        return { promise: Promise.resolve(cached.items), release: () => {} };
+    }
+    if (cached) calendarCache.delete(key);
+
+    let request = calendarRequests.get(key);
+    if (!request) {
+        const controller = new AbortController();
+        request = { controller, subscribers: 0, abortTimer: null, settled: false, promise: null };
+        request.promise = api.get('/api/ui/reminders/calendar', {
+            params: { acctId, start, end },
+            signal: controller.signal,
+        }).then(res => {
+            const items = res.data?.data || [];
+            calendarCache.set(key, { items, timestamp: Date.now() });
+            while (calendarCache.size > MAX_CALENDAR_CACHE_ENTRIES) {
+                calendarCache.delete(calendarCache.keys().next().value);
+            }
+            return items;
+        }).finally(() => {
+            request.settled = true;
+            if (calendarRequests.get(key) === request) calendarRequests.delete(key);
+        });
+        calendarRequests.set(key, request);
+    }
+
+    clearTimeout(request.abortTimer);
+    request.subscribers += 1;
+    let released = false;
+    return {
+        promise: request.promise,
+        release: () => {
+            if (released) return;
+            released = true;
+            request.subscribers -= 1;
+            if (request.subscribers === 0 && !request.settled) {
+                // Delay cancellation so Strict Mode's immediate re-subscribe can reuse it.
+                request.abortTimer = setTimeout(() => request.controller.abort(), 0);
+            }
+        },
+    };
+}
 
 // ── Date helpers (local time, no external lib) ──────────────────────────────────
 const startOfDay  = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -161,6 +212,8 @@ export default function ReminderCalendar() {
     const [loading, setLoading] = useState(false);
     const [hasToday, setHasToday] = useState(false);
     const popRef = useRef(null);
+    const todayRequestRef = useRef({ generation: 0, release: null });
+    const rangeRequestRef = useRef({ generation: 0, release: null });
 
     // Close on outside click
     useEffect(() => {
@@ -172,29 +225,69 @@ export default function ReminderCalendar() {
 
     // Today indicator for the icon colour — refreshed on mount, account change, and on close
     const refreshToday = useCallback(async () => {
-        if (!acctId) return;
+        todayRequestRef.current.release?.();
+        const generation = todayRequestRef.current.generation + 1;
+        todayRequestRef.current = { generation, release: null };
+        if (!acctId) { setHasToday(false); return; }
         const [s, e] = rangeFor('day', new Date());
+        const request = acquireCalendarRequest(acctId, s.toISOString(), e.toISOString());
+        todayRequestRef.current.release = request.release;
         try {
-            const res = await remindersApi.calendar(acctId, s.toISOString(), e.toISOString());
-            setHasToday((res.data?.data || []).length > 0);
+            const nextItems = await request.promise;
+            if (generation === todayRequestRef.current.generation) setHasToday(nextItems.length > 0);
         } catch { /* non-fatal */ }
+        finally {
+            request.release();
+            if (generation === todayRequestRef.current.generation) todayRequestRef.current.release = null;
+        }
     }, [acctId]);
 
-    useEffect(() => { refreshToday(); }, [refreshToday]);
+    useEffect(() => {
+        refreshToday();
+        return () => {
+            todayRequestRef.current.generation += 1;
+            todayRequestRef.current.release?.();
+        };
+    }, [refreshToday]);
 
     // Fetch reminders for the visible range whenever the dialog/view/anchor changes
     const fetchRange = useCallback(async () => {
-        if (!acctId) return;
+        rangeRequestRef.current.release?.();
+        const generation = rangeRequestRef.current.generation + 1;
+        rangeRequestRef.current = { generation, release: null };
+        if (!acctId) { setItems([]); setLoading(false); return; }
         const [s, e] = rangeFor(view, anchor);
+        const request = acquireCalendarRequest(acctId, s.toISOString(), e.toISOString());
+        rangeRequestRef.current.release = request.release;
         setLoading(true);
         try {
-            const res = await remindersApi.calendar(acctId, s.toISOString(), e.toISOString());
-            setItems(res.data?.data || []);
-        } catch { setItems([]); }
-        finally { setLoading(false); }
+            const nextItems = await request.promise;
+            if (generation === rangeRequestRef.current.generation) setItems(nextItems);
+        } catch {
+            if (generation === rangeRequestRef.current.generation) setItems([]);
+        } finally {
+            request.release();
+            if (generation === rangeRequestRef.current.generation) {
+                rangeRequestRef.current.release = null;
+                setLoading(false);
+            }
+        }
     }, [acctId, view, anchor]);
 
-    useEffect(() => { if (open) fetchRange(); }, [open, fetchRange]);
+    useEffect(() => {
+        if (open) fetchRange();
+        return () => {
+            rangeRequestRef.current.generation += 1;
+            rangeRequestRef.current.release?.();
+        };
+    }, [open, fetchRange]);
+
+    useEffect(() => () => {
+        todayRequestRef.current.generation += 1;
+        todayRequestRef.current.release?.();
+        rangeRequestRef.current.generation += 1;
+        rangeRequestRef.current.release?.();
+    }, []);
 
     const handleToggle = () => {
         setOpen(o => {

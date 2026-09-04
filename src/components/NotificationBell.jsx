@@ -9,6 +9,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate }  from 'react-router-dom';
 import { remindersApi } from '../api/remindersApi';
+import api from '../api/axiosConfig';
+import { useAuth } from '../context/AuthContext';
+import { useAccount } from '../context/AccountContext';
 import {
     SOUND_MOODS,
     getSoundSettings,
@@ -18,6 +21,7 @@ import {
 } from '../utils/notificationSound';
 
 const PAGE_SIZE = 10;
+const MAX_RETAINED_REMINDERS = 100;
 
 function formatScheduledAt(dateStr) {
     if (!dateStr) return '';
@@ -29,9 +33,8 @@ function formatScheduledAt(dateStr) {
 
 export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const navigate     = useNavigate();
-    // adminId is account_admins._id stored in localStorage by resolveChatbotAdmin.
-    // Read once on mount — stable for the component lifetime (re-mounts on account switch).
-    const adminId      = localStorage.getItem('adminId') || '';
+    const { adminId = '' } = useAuth();
+    const { acctId = '' } = useAccount();
     const [isOpen,     setIsOpen]     = useState(false);
     const [reminders,  setReminders]  = useState([]);
     const [loading,    setLoading]    = useState(false);
@@ -42,6 +45,9 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
     const [soundPanelOpen, setSoundPanelOpen] = useState(false);
     const dropdownRef  = useRef(null);
     const listRef      = useRef(null);
+    const requestRef   = useRef({ generation: 0, firstController: null, moreController: null });
+    const firstLoadingRef = useRef(false);
+    const moreLoadingRef = useRef(false);
 
     // Update sound preferences (mute / mood) and persist them. A short preview
     // plays on change (also a user gesture, which unlocks audio for later cues).
@@ -70,29 +76,76 @@ export default function NotificationBell({ firedCount = 0, setFiredCount }) {
 
     // Fetch page 1
     const fetchFirst = useCallback(async () => {
+        if (!adminId || firstLoadingRef.current) return;
+        requestRef.current.firstController?.abort();
+        requestRef.current.moreController?.abort();
+        const controller = new AbortController();
+        const generation = requestRef.current.generation + 1;
+        requestRef.current = { generation, firstController: controller, moreController: null };
+        firstLoadingRef.current = true;
+        moreLoadingRef.current = false;
         setLoading(true);
         try {
-            const res = await remindersApi.getFired(1, PAGE_SIZE, adminId);
+            const res = await api.get('/api/ui/reminders/fired', {
+                params: { page: 1, limit: PAGE_SIZE, adminId },
+                signal: controller.signal,
+            });
+            if (generation !== requestRef.current.generation) return;
             setReminders(res.data?.data || []);
             setHasMore(res.data?.hasMore || false);
             setPage(1);
         } catch { /* non-fatal */ }
-        finally { setLoading(false); }
+        finally {
+            if (generation === requestRef.current.generation) setLoading(false);
+            firstLoadingRef.current = false;
+        }
     }, [adminId]);
 
     // Fetch next page and append
     const fetchMore = useCallback(async () => {
-        if (loadingMore || !hasMore) return;
+        if (moreLoadingRef.current || loadingMore || !hasMore || !adminId) return;
+        const generation = requestRef.current.generation;
+        const controller = new AbortController();
+        requestRef.current.moreController = controller;
+        moreLoadingRef.current = true;
         setLoadingMore(true);
         try {
             const nextPage = page + 1;
-            const res = await remindersApi.getFired(nextPage, PAGE_SIZE, adminId);
-            setReminders(prev => [...prev, ...(res.data?.data || [])]);
-            setHasMore(res.data?.hasMore || false);
+            const res = await api.get('/api/ui/reminders/fired', {
+                params: { page: nextPage, limit: PAGE_SIZE, adminId },
+                signal: controller.signal,
+            });
+            if (generation !== requestRef.current.generation) return;
+            const newItems = res.data?.data || [];
+            setReminders(prev => [...prev, ...newItems].slice(0, MAX_RETAINED_REMINDERS));
+            setHasMore((res.data?.hasMore || false) && nextPage * PAGE_SIZE < MAX_RETAINED_REMINDERS);
             setPage(nextPage);
         } catch { /* non-fatal */ }
-        finally { setLoadingMore(false); }
+        finally {
+            if (generation === requestRef.current.generation) setLoadingMore(false);
+            moreLoadingRef.current = false;
+        }
     }, [page, hasMore, loadingMore, adminId]);
+
+    useEffect(() => {
+        requestRef.current.firstController?.abort();
+        requestRef.current.moreController?.abort();
+        requestRef.current.generation += 1;
+        firstLoadingRef.current = false;
+        moreLoadingRef.current = false;
+        setReminders([]);
+        setPage(1);
+        setHasMore(false);
+        setLoading(false);
+        setLoadingMore(false);
+        setIsOpen(false);
+    }, [acctId, adminId]);
+
+    useEffect(() => () => {
+        requestRef.current.generation += 1;
+        requestRef.current.firstController?.abort();
+        requestRef.current.moreController?.abort();
+    }, []);
 
     // Infinite scroll — detect when list reaches bottom
     const handleListScroll = useCallback(() => {

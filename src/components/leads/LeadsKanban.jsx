@@ -27,9 +27,11 @@ import api from '../../api/axiosConfig';
 import { activityApi } from '../../api/notesApi';
 import Tooltip from '../Tooltip';
 import { tint, twoLetterColor, adminDisplayName } from './leadShared';
+import { normalizeListResponse } from './pagination';
 
 const PAGE = 15;
-const EMPTY_COL = { leads: [], page: 0, total: 0, loading: false, done: false, error: null };
+const MAX_RETAINED_PAGES = 5;
+const EMPTY_COL = { leads: [], page: 0, nextCursor: null, nextPage: null, total: null, loading: false, done: false, error: null };
 
 /** Mirror of LeadsGrid.isFilterActive — kept local so the Kanban builds the
  *  exact same `fieldFilters` payload as the grid. */
@@ -60,7 +62,7 @@ const CardAvatar = ({ lead, size = 'w-6 h-6' }) => {
         return <span className={`${size} rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-300 text-[10px] shrink-0`}>∅</span>;
     }
     return lead.adminProfileImage
-        ? <img src={lead.adminProfileImage} alt="" className={`${size} rounded-full object-cover border border-gray-200 shrink-0`} onError={e => { e.target.style.display = 'none'; }} />
+        ? <img src={lead.adminProfileImage} alt="" loading="lazy" decoding="async" className={`${size} rounded-full object-cover border border-gray-200 shrink-0`} onError={e => { e.target.style.display = 'none'; }} />
         : <span className={`${size} rounded-full flex items-center justify-center text-white font-bold text-[10px] select-none shrink-0`} style={{ backgroundColor: twoLetterColor(name) }}>{name.charAt(0).toUpperCase()}</span>;
 };
 
@@ -99,7 +101,7 @@ const KanbanCard = ({
 
     const renderAdminAvatar = (a) => (
         a.profileImage
-            ? <img src={a.profileImage} alt="" className="w-5 h-5 rounded-full object-cover border border-gray-200 shrink-0" onError={e => { e.target.style.display = 'none'; }} />
+            ? <img src={a.profileImage} alt="" loading="lazy" decoding="async" className="w-5 h-5 rounded-full object-cover border border-gray-200 shrink-0" onError={e => { e.target.style.display = 'none'; }} />
             : <span className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold text-[9px] select-none shrink-0" style={{ backgroundColor: twoLetterColor(adminDisplayName(a)) }}>{adminDisplayName(a).charAt(0).toUpperCase()}</span>
     );
 
@@ -284,7 +286,7 @@ const KanbanColumn = ({
     const [nameDraft, setNameDraft] = useState(stage.name);
     const menuRef = useRef(null);
 
-    const { leads = [], total = 0, loading, done } = col || EMPTY_COL;
+    const { leads = [], total, loading, done } = col || EMPTY_COL;
 
     // Lazy-load the next page when the bottom sentinel scrolls into view.
     useEffect(() => {
@@ -327,7 +329,7 @@ const KanbanColumn = ({
                     ) : (
                         <h3 className="flex-1 min-w-0 truncate text-[12px] font-bold text-gray-700">{stage.name}</h3>
                     )}
-                    <span className="shrink-0 text-[10px] font-bold text-gray-500 bg-white/70 rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center">{total}</span>
+                    <span className="shrink-0 text-[10px] font-bold text-gray-500 bg-white/70 rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center">{total ?? leads.length}</span>
 
                     {/* Reorder */}
                     <button disabled={busy || index === 0} onClick={() => onReorder(index, -1)} className="shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-700 disabled:opacity-25" title="Move left">
@@ -465,6 +467,9 @@ const LeadsKanban = ({
     const columnsRef = useRef(columns);
     useEffect(() => { columnsRef.current = columns; }, [columns]);
     const inflightRef = useRef({});
+    const requestControllersRef = useRef({});
+    const countControllersRef = useRef(new Set());
+    const generationRef = useRef(0);
 
     const stagesBase = `/api/ui/leads/collections/${collectionId}/stages`;
 
@@ -476,16 +481,17 @@ const LeadsKanban = ({
     // Add/delete of a stage changes the id-set (rename/recolor/reorder do not).
     const stageIdSig = useMemo(() => stages.map(s => s.id).slice().sort((a, b) => a - b).join(','), [stages]);
 
-    const buildParams = useCallback((stageId, page) => {
+    const buildParams = useCallback((stageId, cursor, page) => {
         const active = {};
         for (const [k, v] of Object.entries(appliedFilters || {})) {
             if (k !== 'collectionId' && isFilterActive(v)) active[k] = v;
         }
         active.stage = { type: 'number', op: 'eq', value: Number(stageId) };
         return {
-            page,
             limit: PAGE,
             acctId,
+            ...(cursor != null && { cursor }),
+            ...(page != null && { page }),
             ...(collectionId && { collectionId }),
             ...(sortField && { sortBy: sortField, sortOrder }),
             fieldFilters: JSON.stringify(active),
@@ -494,33 +500,56 @@ const LeadsKanban = ({
     }, [appliedFilters, acctId, collectionId, sortField, sortOrder, isSuperAdmin, responsibleFilter]);
 
     // 1 combined call per stage-page (instead of 2 separate notes + reminders calls)
-    const mergeCounts = useCallback((leadIds) => {
+    const mergeCounts = useCallback((leadIds, generation) => {
         if (!leadIds.length || !acctId) return;
-        activityApi.batchCounts(leadIds, acctId).then(r => {
+        const controller = new AbortController();
+        countControllersRef.current.add(controller);
+        activityApi.batchCounts(leadIds, acctId, { signal: controller.signal }).then(r => {
+            if (generation !== generationRef.current) return;
             const d = r.data?.data || {};
             if (d.notes)     setNoteCounts(prev => ({ ...prev, ...d.notes }));
             if (d.reminders) setReminderCounts(prev => ({ ...prev, ...d.reminders }));
-        }).catch(() => {});
+        }).catch(() => {}).finally(() => countControllersRef.current.delete(controller));
     }, [acctId, setNoteCounts, setReminderCounts]);
 
-    const fetchPage = useCallback(async (stageId, page) => {
+    const fetchPage = useCallback(async (stageId, { cursor = null, page = null, replace = false } = {}) => {
         if (inflightRef.current[stageId]) return;
+        const generation = generationRef.current;
+        const controller = new AbortController();
+        requestControllersRef.current[stageId]?.abort();
+        requestControllersRef.current[stageId] = controller;
         inflightRef.current[stageId] = true;
         setColumns(prev => ({ ...prev, [stageId]: { ...(prev[stageId] || EMPTY_COL), loading: true, error: null } }));
         try {
-            const res = await api.get('/api/ui/leads', { params: buildParams(stageId, page) });
-            const newLeads = res.data?.data || [];
-            const total = res.data?.pagination?.total ?? 0;
+            const res = await api.get('/api/ui/leads', { params: buildParams(stageId, cursor, page), signal: controller.signal });
+            if (generation !== generationRef.current) return;
+            const normalized = normalizeListResponse(res);
+            const newLeads = normalized.items;
             setColumns(prev => {
                 const col = prev[stageId] || EMPTY_COL;
-                const leads = page === 1 ? newLeads : [...col.leads, ...newLeads];
-                return { ...prev, [stageId]: { leads, page, total, loading: false, done: newLeads.length < PAGE || leads.length >= total, error: null } };
+                const combined = replace ? newLeads : [...col.leads, ...newLeads];
+                const leads = combined.slice(-(PAGE * MAX_RETAINED_PAGES));
+                return {
+                    ...prev,
+                    [stageId]: {
+                        leads,
+                        page: replace ? 1 : (col.page || 0) + 1,
+                        nextCursor: normalized.nextCursor,
+                        nextPage: normalized.nextPage,
+                        total: normalized.total,
+                        loading: false,
+                        done: !normalized.hasNext,
+                        error: null,
+                    },
+                };
             });
-            mergeCounts(newLeads.map(l => l._id));
+            mergeCounts(newLeads.map(l => l._id), generation);
         } catch (err) {
-            setColumns(prev => ({ ...prev, [stageId]: { ...(prev[stageId] || EMPTY_COL), loading: false, error: err?.message || 'Failed to load' } }));
+            if (generation === generationRef.current && err.code !== 'ERR_CANCELED' && err.name !== 'CanceledError') {
+                setColumns(prev => ({ ...prev, [stageId]: { ...(prev[stageId] || EMPTY_COL), loading: false, error: err?.message || 'Failed to load' } }));
+            }
         } finally {
-            inflightRef.current[stageId] = false;
+            if (generation === generationRef.current) inflightRef.current[stageId] = false;
         }
     }, [buildParams, mergeCounts]);
 
@@ -530,16 +559,38 @@ const LeadsKanban = ({
     // wasted kanban fetches (and switching to kanban fetches fresh data).
     useEffect(() => {
         if (!isActive) return;
+        generationRef.current += 1;
+        Object.values(requestControllersRef.current).forEach(controller => controller.abort());
+        countControllersRef.current.forEach(controller => controller.abort());
+        requestControllersRef.current = {};
+        countControllersRef.current.clear();
         inflightRef.current = {};
         setColumns({});
-        stages.forEach(s => fetchPage(s.id, 1));
+        stages.forEach(s => fetchPage(s.id, { replace: true }));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filterSig, stageIdSig, isActive]);
+
+    useEffect(() => () => {
+        generationRef.current += 1;
+        Object.values(requestControllersRef.current).forEach(controller => controller.abort());
+        countControllersRef.current.forEach(controller => controller.abort());
+    }, []);
+
+    // Counts follow the same bounded card window instead of accumulating forever.
+    useEffect(() => {
+        if (stages.some(stage => !columns[stage.id])) return;
+        const retained = new Set(Object.values(columns).flatMap(col => col.leads.map(lead => lead._id)));
+        setNoteCounts(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => retained.has(id))));
+        setReminderCounts(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => retained.has(id))));
+    }, [columns, stages, setNoteCounts, setReminderCounts]);
 
     const loadMore = useCallback((stageId) => {
         const col = columnsRef.current[stageId];
         if (!col || col.loading || col.done) return;
-        fetchPage(stageId, (col.page || 0) + 1);
+        fetchPage(stageId, {
+            cursor: col.nextCursor,
+            page: col.nextCursor == null ? col.nextPage : null,
+        });
     }, [fetchPage]);
 
     // ── Move a lead to another stage (drag or the card's move icon) ───────────
@@ -552,8 +603,8 @@ const LeadsKanban = ({
             const to   = prev[toStageId]   || EMPTY_COL;
             return {
                 ...prev,
-                [fromStageId]: { ...from, leads: from.leads.filter(l => l._id !== lead._id), total: Math.max(0, from.total - 1) },
-                [toStageId]:   { ...to,   leads: [{ ...lead, stage: toStageId }, ...to.leads], total: to.total + 1 },
+                [fromStageId]: { ...from, leads: from.leads.filter(l => l._id !== lead._id), total: from.total == null ? null : Math.max(0, from.total - 1) },
+                [toStageId]:   { ...to,   leads: [{ ...lead, stage: toStageId }, ...to.leads], total: to.total == null ? null : to.total + 1 },
             };
         });
         try {
@@ -561,8 +612,8 @@ const LeadsKanban = ({
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to move lead.');
             // Revert by refetching both affected columns.
-            fetchPage(fromStageId, 1);
-            fetchPage(toStageId, 1);
+            fetchPage(fromStageId, { replace: true });
+            fetchPage(toStageId, { replace: true });
         }
     }, [acctId, acctNo, fetchPage, showError]);
 
@@ -579,7 +630,7 @@ const LeadsKanban = ({
         setColumns(prev => {
             const col = prev[lead.stage]; if (!col) return prev;
             if (removesFromView) {
-                return { ...prev, [lead.stage]: { ...col, leads: col.leads.filter(l => l._id !== lead._id), total: Math.max(0, col.total - 1) } };
+                return { ...prev, [lead.stage]: { ...col, leads: col.leads.filter(l => l._id !== lead._id), total: col.total == null ? null : Math.max(0, col.total - 1) } };
             }
             return { ...prev, [lead.stage]: { ...col, leads: col.leads.map(l => l._id === lead._id ? { ...l, ...optimistic } : l) } };
         });
@@ -587,7 +638,7 @@ const LeadsKanban = ({
             await api.put(`/api/ui/leads/${lead._id}`, { responsible: userId }, { params: { acctId, acctNo } });
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to reassign lead.');
-            fetchPage(lead.stage, 1);
+            fetchPage(lead.stage, { replace: true });
         }
     }, [admins, isSuperAdmin, currentUserId, acctId, acctNo, fetchPage, showError]);
 

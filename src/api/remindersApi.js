@@ -3,8 +3,11 @@ import api from './axiosConfig';
 const BASE = (leadId) => `/api/ui/leads/${leadId}/reminders`;
 
 export const remindersApi = {
-    /** Fetch all reminders for a lead (creator-only) */
-    getAll:   (leadId, acctId)                   => api.get(BASE(leadId),                         { params: { acctId } }),
+    /** Fetch reminders for a lead. Supports cursor or page pagination. */
+    getAll:   (leadId, acctId, { cursor, page, limit = 25, signal } = {}) => api.get(BASE(leadId), {
+        params: { acctId, limit, ...(cursor != null && { cursor }), ...(page != null && { page }) },
+        signal,
+    }),
 
     /** Create and schedule a new reminder */
     create:   (leadId, data, acctId)             => api.post(BASE(leadId), data,                  { params: { acctId } }),
@@ -28,5 +31,5 @@ export const remindersApi = {
     dismissFired: (reminderId, adminId)            => api.delete(`/api/ui/reminders/fired/${reminderId}`, { params: { adminId } }),
 
     /** Get pending reminder counts for multiple leads (for grid badge highlights) */
-    batchCounts:  (leadIds, acctId)              => api.post('/api/ui/activity/reminders/batch-counts', { leadIds }, { params: { acctId } }),
+    batchCounts:  (leadIds, acctId, config = {}) => api.post('/api/ui/activity/reminders/batch-counts', { leadIds }, { params: { acctId }, ...config }),
 };

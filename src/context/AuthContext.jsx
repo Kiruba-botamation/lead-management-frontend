@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
+import React, { createContext, useState, useEffect, useContext, useRef, useCallback, useMemo } from 'react';
 import api, { AUTH_SERVICE_URL, authApi } from '../api/axiosConfig';
 import {
     normalizeUserData,
@@ -36,10 +36,10 @@ function saveChatbotAdminToStorage(obj) {
  * @param {function} setAdminId      - state setter from AuthContext
  * @returns {object|null}            - the chatbotAdmin display data object, or null
  */
-export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId) {
+export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId, signal) {
     if (!acctId || !userId) return null;
     try {
-        const res = await api.get('/api/ui/admins/list', { params: { acctId, userId, limit: 1 } });
+        const res = await api.get('/api/ui/admins/list', { params: { acctId, userId, limit: 1 }, signal });
         const raw = res.data;
         const adminList = Array.isArray(raw) ? raw : (raw.admins || raw.data || []);
 
@@ -67,7 +67,9 @@ export async function resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAd
         setChatbotAdmin?.(data);
         return data;
     } catch (err) {
-        console.warn('[SSO] resolveChatbotAdmin error:', err.message);
+        if (err.code !== 'ERR_CANCELED' && err.name !== 'CanceledError') {
+            console.warn('[SSO] resolveChatbotAdmin error:', err.message);
+        }
         return null;
     }
 }
@@ -92,15 +94,13 @@ export const AuthProvider = ({ children }) => {
     // Prevents duplicate checks in React StrictMode
     const authCheckedRef = useRef(false);
     const authCheckingRef = useRef(false);
+    const authRequestRef = useRef({ generation: 0, controller: null });
 
-    useEffect(() => {
-        if (authCheckedRef.current || authCheckingRef.current) return;
-        authCheckedRef.current = true;
-        authCheckingRef.current = true;
-        checkAuth();
-    }, []);
-
-    const checkAuth = async () => {
+    const checkAuth = useCallback(async () => {
+        authRequestRef.current.controller?.abort();
+        const controller = new AbortController();
+        const generation = authRequestRef.current.generation + 1;
+        authRequestRef.current = { generation, controller };
         let redirectingTo401 = false;
         try {
             setLoading(true);
@@ -108,7 +108,8 @@ export const AuthProvider = ({ children }) => {
             // ── Core SSO auth check ──────────────────────────────────────────
             // Backend reads the HTTP-only JWT cookie and returns the user.
             // If cookie is missing or expired, it returns 401 (interceptor redirects).
-            const response = await api.get('/api/ui/sso/auth');
+            const response = await api.get('/api/ui/sso/auth', { signal: controller.signal });
+            if (generation !== authRequestRef.current.generation) return;
 
             if (response.data.success || response.data.user) {
                 const rawUser = response.data.user || response.data.data || {};
@@ -125,8 +126,9 @@ export const AuthProvider = ({ children }) => {
 
                 // ── Optional: Fetch full user profile from auth backend ──────
                 if (userData.userId) {
-                    try {
-                        const profileRes = await authApi.get(`/api/user/users/${userData.userId}`);
+                    void authApi.get(`/api/user/users/${userData.userId}`, { signal: controller.signal })
+                        .then(profileRes => {
+                            if (generation !== authRequestRef.current.generation) return;
                         if (profileRes.data?.success && profileRes.data?.user) {
                             const profile = profileRes.data.user;
                             setUserDetails({
@@ -144,15 +146,19 @@ export const AuthProvider = ({ children }) => {
                                 localStorage.setItem('userEmail', profile.email.trim().toLowerCase());
                             }
                         }
-                    } catch (profileError) {
-                        console.warn('[SSO] Could not fetch user profile:', profileError.message);
-                    }
+                        })
+                        .catch(profileError => {
+                            if (profileError.code !== 'ERR_CANCELED' && profileError.name !== 'CanceledError') {
+                                console.warn('[SSO] Could not fetch user profile:', profileError.message);
+                            }
+                        });
                 }
             } else {
                 setAuthenticated(false);
                 setUser(null);
             }
         } catch (error) {
+            if (controller.signal.aborted || generation !== authRequestRef.current.generation) return;
             if (error.response?.status === 401) {
                 // 401 → the axios interceptor is already redirecting to SSO login.
                 // Keep loading=true so ProtectedRoute shows the spinner instead
@@ -165,14 +171,30 @@ export const AuthProvider = ({ children }) => {
                 setUser(null);
             }
         } finally {
-            if (!redirectingTo401) {
+            if (generation === authRequestRef.current.generation && !redirectingTo401) {
                 setLoading(false);
             }
-            authCheckingRef.current = false;
+            if (generation === authRequestRef.current.generation) {
+                authCheckingRef.current = false;
+            }
         }
-    };
+    }, []);
 
-    const logout = async () => {
+    useEffect(() => {
+        if (authCheckedRef.current || authCheckingRef.current) return undefined;
+        authCheckedRef.current = true;
+        authCheckingRef.current = true;
+        checkAuth();
+        return () => {
+            authRequestRef.current.controller?.abort();
+            authCheckedRef.current = false;
+            authCheckingRef.current = false;
+        };
+    }, [checkAuth]);
+
+    const logout = useCallback(async () => {
+        authRequestRef.current.controller?.abort();
+        authRequestRef.current.generation += 1;
         // 1. Clear local state immediately
         setAuthenticated(false);
         setUser(null);
@@ -196,34 +218,39 @@ export const AuthProvider = ({ children }) => {
         // 4. Redirect to SSO login page
         const redirectParam = encodeURIComponent(getCurrentServiceUrl());
         window.location.href = `${AUTH_SERVICE_URL}/login?redirect=${redirectParam}`;
-    };
+    }, []);
 
-    const redirectToLogin = () => {
+    const redirectToLogin = useCallback(() => {
         redirectToSSOLogin(getCurrentServiceUrl());
-    };
+    }, []);
+
+    const contextValue = useMemo(() => ({
+        user,
+        setUser,
+        userDetails,
+        setUserDetails,
+        adminId,
+        setAdminId,
+        accessLevel,
+        setAccessLevel,
+        adminResolved,
+        setAdminResolved,
+        chatbotAdmin,
+        setChatbotAdmin,
+        adminViewActive,
+        setAdminViewActive,
+        authenticated,
+        loading,
+        logout,
+        checkAuth,
+        redirectToLogin,
+    }), [
+        user, userDetails, adminId, accessLevel, adminResolved, chatbotAdmin,
+        adminViewActive, authenticated, loading, logout, checkAuth, redirectToLogin,
+    ]);
 
     return (
-        <AuthContext.Provider value={{
-            user,
-            setUser,
-            userDetails,
-            setUserDetails,
-            adminId,
-            setAdminId,
-            accessLevel,        // 'superadmin' | 'admin' | null
-            setAccessLevel,
-            adminResolved,      // true once the per-account admin lookup completed
-            setAdminResolved,
-            chatbotAdmin,    // { name, profileImageUrl, chatbotAdminId, userId, accessLevel } — persisted to localStorage
-            setChatbotAdmin,
-            adminViewActive,
-            setAdminViewActive,
-            authenticated,
-            loading,
-            logout,
-            checkAuth,
-            redirectToLogin,
-        }}>
+        <AuthContext.Provider value={contextValue}>
             {children}
         </AuthContext.Provider>
     );

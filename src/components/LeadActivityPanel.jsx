@@ -14,6 +14,25 @@ import NoteCard         from './NoteCard';
 import AddNoteForm      from './AddNoteForm';
 import ReminderCard     from './ReminderCard';
 import AddReminderForm  from './AddReminderForm';
+import { normalizeListResponse } from './leads/pagination';
+
+const EMPTY_PAGE = { nextCursor: null, nextPage: null, hasNext: false, total: null };
+
+const sortReminders = (rems) => {
+    const now = new Date();
+    const upcoming = rems
+        .filter(r => !r.mainSent && new Date(r.scheduledAt) > now)
+        .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+    const past = rems
+        .filter(r => r.mainSent || new Date(r.scheduledAt) <= now)
+        .sort((a, b) => new Date(b.scheduledAt) - new Date(a.scheduledAt));
+    return [...upcoming, ...past];
+};
+
+const appendUnique = (current, incoming) => {
+    const seen = new Set(current.map(item => item._id));
+    return [...current, ...incoming.filter(item => !seen.has(item._id))];
+};
 
 // ── SVG icons ─────────────────────────────────────────────────────────────────
 
@@ -87,62 +106,93 @@ export default function LeadActivityPanel({
     const [reminders,    setReminders]    = useState([]);
     const [loadingNotes, setLoadingNotes] = useState(false);
     const [loadingRems,  setLoadingRems]  = useState(false);
+    const [notesPage,    setNotesPage]    = useState(EMPTY_PAGE);
+    const [remindersPage, setRemindersPage] = useState(EMPTY_PAGE);
     const [showAddForm,  setShowAddForm]  = useState(false); // for reminders
 
     const bodyRef = useRef(null);  // ref to .activity-panel__body — used to scroll footer into view
+    const requestsRef = useRef({ notes: null, reminders: null });
+    const generationsRef = useRef({ notes: 0, reminders: 0 });
+    const onErrorRef = useRef(onError);
+    useEffect(() => { onErrorRef.current = onError; }, [onError]);
 
     const leadId = lead?._id;
     const acctId = lead?.acctId; // passed as query param to every API call
 
     // ── Fetch helpers ─────────────────────────────────────────────────────────
 
-    const fetchNotes = useCallback(async () => {
+    const fetchTab = useCallback(async (tab, pageToken = null, append = false) => {
         if (!leadId) return;
-        setLoadingNotes(true);
+        requestsRef.current[tab]?.abort();
+        const controller = new AbortController();
+        requestsRef.current[tab] = controller;
+        const generation = ++generationsRef.current[tab];
+        const setLoading = tab === 'notes' ? setLoadingNotes : setLoadingRems;
+        setLoading(true);
         try {
-            const res = await notesApi.getAll(leadId, acctId);
-            setNotes(res.data?.data || []);
+            const options = {
+                limit: 25,
+                signal: controller.signal,
+                ...(pageToken?.cursor != null && { cursor: pageToken.cursor }),
+                ...(pageToken?.page != null && { page: pageToken.page }),
+            };
+            const res = tab === 'notes'
+                ? await notesApi.getAll(leadId, acctId, options)
+                : await remindersApi.getAll(leadId, acctId, options);
+            if (generation !== generationsRef.current[tab]) return;
+            const normalized = normalizeListResponse(res);
+            const pageState = {
+                nextCursor: normalized.nextCursor,
+                nextPage: normalized.nextPage,
+                hasNext: normalized.hasNext,
+                total: normalized.total,
+            };
+            if (tab === 'notes') {
+                setNotes(prev => append ? appendUnique(prev, normalized.items) : normalized.items);
+                setNotesPage(pageState);
+            } else {
+                setReminders(prev => sortReminders(append ? appendUnique(prev, normalized.items) : normalized.items));
+                setRemindersPage(pageState);
+            }
         } catch (err) {
-            onError?.(err.response?.data?.message || 'Failed to load notes.');
+            if (err.code !== 'ERR_CANCELED' && err.name !== 'CanceledError') {
+                onErrorRef.current?.(err.response?.data?.message || `Failed to load ${tab}.`);
+            }
         } finally {
-            setLoadingNotes(false);
+            if (generation === generationsRef.current[tab]) setLoading(false);
         }
-    }, [leadId, acctId, onError]);
+    }, [leadId, acctId]);
 
-    const sortReminders = (rems) => {
-        const now = new Date();
-        const upcoming = rems
-            .filter(r => !r.mainSent && new Date(r.scheduledAt) > now)
-            .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
-        const past = rems
-            .filter(r => r.mainSent || new Date(r.scheduledAt) <= now)
-            .sort((a, b) => new Date(b.scheduledAt) - new Date(a.scheduledAt));
-        return [...upcoming, ...past];
-    };
+    // Only the visible tab is fetched. Switching leads invalidates both tab caches.
+    useEffect(() => {
+        requestsRef.current.notes?.abort();
+        requestsRef.current.reminders?.abort();
+        generationsRef.current.notes += 1;
+        generationsRef.current.reminders += 1;
+        setNotes([]);
+        setReminders([]);
+        setNotesPage(EMPTY_PAGE);
+        setRemindersPage(EMPTY_PAGE);
+    }, [leadId]);
 
-    const fetchReminders = useCallback(async () => {
-        if (!leadId) return;
-        setLoadingRems(true);
-        try {
-            const res = await remindersApi.getAll(leadId, acctId);
-            setReminders(sortReminders(res.data?.data || []));
-        } catch (err) {
-            onError?.(err.response?.data?.message || 'Failed to load reminders.');
-        } finally {
-            setLoadingRems(false);
-        }
-    }, [leadId, acctId, onError]);
-
-    // Fetch on mount and when lead changes
-    useEffect(() => { fetchNotes(); },    [fetchNotes]);
-    useEffect(() => { fetchReminders(); }, [fetchReminders]);
+    useEffect(() => {
+        fetchTab(activeTab);
+        return () => requestsRef.current[activeTab]?.abort();
+    }, [activeTab, fetchTab]);
 
     // Re-fetch when tab switches (keep data fresh)
     const handleTabChange = (tab) => {
         setActiveTab(tab);
         setShowAddForm(false);
-        if (tab === 'notes')     fetchNotes();
-        if (tab === 'reminders') fetchReminders();
+    };
+
+    const loadMore = () => {
+        const pageState = activeTab === 'notes' ? notesPage : remindersPage;
+        if (!pageState.hasNext) return;
+        fetchTab(activeTab, {
+            cursor: pageState.nextCursor,
+            page: pageState.nextCursor == null ? pageState.nextPage : null,
+        }, true);
     };
 
     // ── Scroll to bottom when reminder form opens so footer is visible ─────────
@@ -169,6 +219,7 @@ export default function LeadActivityPanel({
             adminProfileImage: note.adminProfileImage || currentUser?.profileImageUrl || null,
         };
         setNotes(prev => [patched, ...prev]);
+        setNotesPage(prev => ({ ...prev, total: prev.total == null ? null : prev.total + 1 }));
     };
 
     const handleNoteEdit = async (noteId, description, adminId) => {
@@ -185,6 +236,7 @@ export default function LeadActivityPanel({
         try {
             await notesApi.remove(leadId, noteId, acctId, adminId);
             setNotes(prev => prev.filter(n => n._id !== noteId));
+            setNotesPage(prev => ({ ...prev, total: prev.total == null ? null : Math.max(0, prev.total - 1) }));
         } catch (err) {
             onError?.(err.response?.data?.message || 'Failed to delete note.');
         }
@@ -200,6 +252,7 @@ export default function LeadActivityPanel({
             setReminders(prev => sortReminders(prev.map(r => r._id === rem._id ? rem : r)));
         } else {
             setReminders(prev => sortReminders([rem, ...prev]));
+            setRemindersPage(prev => ({ ...prev, total: prev.total == null ? null : prev.total + 1 }));
         }
         setShowAddForm(false);
         setEditReminder(null);
@@ -214,6 +267,7 @@ export default function LeadActivityPanel({
         try {
             await remindersApi.remove(leadId, reminderId, acctId, adminId);
             setReminders(prev => prev.filter(r => r._id !== reminderId));
+            setRemindersPage(prev => ({ ...prev, total: prev.total == null ? null : Math.max(0, prev.total - 1) }));
         } catch (err) {
             onError?.(err.response?.data?.message || 'Failed to delete reminder.');
         }
@@ -251,8 +305,8 @@ export default function LeadActivityPanel({
                     onClick={() => handleTabChange('notes')}
                 >
                     Notes
-                    {notes.length > 0 && (
-                        <span className="activity-panel__tab-badge">{notes.length}</span>
+                    {(notesPage.total ?? notes.length) > 0 && (
+                        <span className="activity-panel__tab-badge">{notesPage.total ?? notes.length}</span>
                     )}
                 </button>
                 <button
@@ -260,8 +314,8 @@ export default function LeadActivityPanel({
                     onClick={() => handleTabChange('reminders')}
                 >
                     Reminders
-                    {reminders.length > 0 && (
-                        <span className="activity-panel__tab-badge">{reminders.length}</span>
+                    {(remindersPage.total ?? reminders.length) > 0 && (
+                        <span className="activity-panel__tab-badge">{remindersPage.total ?? reminders.length}</span>
                     )}
                 </button>
             </div>
@@ -297,6 +351,9 @@ export default function LeadActivityPanel({
                                     onDelete={handleNoteDelete}
                                 />
                             ))
+                        )}
+                        {!loadingNotes && notesPage.hasNext && (
+                            <button className="btn btn--secondary btn--sm btn--block" onClick={loadMore}>Load more notes</button>
                         )}
                     </>
                 )}
@@ -348,6 +405,9 @@ export default function LeadActivityPanel({
                                 />
                             ))
                         ))}
+                        {!showAddForm && !loadingRems && remindersPage.hasNext && (
+                            <button className="btn btn--secondary btn--sm btn--block" onClick={loadMore}>Load more reminders</button>
+                        )}
                     </>
                 )}
 

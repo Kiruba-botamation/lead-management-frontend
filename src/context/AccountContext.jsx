@@ -4,11 +4,13 @@ import React, {
     useEffect,
     useContext,
     useCallback,
+    useMemo,
+    useRef,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { useAuth, resolveChatbotAdmin } from './AuthContext';
-import { useNotifications } from '../components/Notifications';
+import { NotificationViewport, useNotifications } from '../components/Notifications';
 import {
     cleanupAccounts,
     setAcctInLocalStorage,
@@ -46,19 +48,36 @@ export const AccountProvider = ({ children }) => {
     const [accountsRefreshKey, setAccountsRefreshKey] = useState(0);
 
     // ── Notifications ──────────────────────────────────────────────────────────
-    const { showSuccess, NotificationComponent } = useNotifications();
+    const { showSuccess } = useNotifications();
+    const accountsRequestRef = useRef({ generation: 0, controller: null });
+    const linkDialogTimerRef = useRef(null);
+
+    // Apply an account object as the selected/active account
+    const applySelectedAccount = useCallback((account) => {
+        setSelectedAccount(account);
+        setAcctNo(account.acctNo || '');
+        setAcctId(account.acctId || '');
+        setAcctName(account.accountName || '');
+        setAcctInLocalStorage(account.acctNo, account.acctId);
+    }, []);
 
     // ── Fetch linked accounts from backend ────────────────────────────────────
     const fetchAccounts = useCallback(async () => {
         const userId = user?.userId || localStorage.getItem('userId');
         if (!userId) return;
 
+        accountsRequestRef.current.controller?.abort();
+        const controller = new AbortController();
+        const generation = accountsRequestRef.current.generation + 1;
+        accountsRequestRef.current = { generation, controller };
         setAccountsLoading(true);
 
         try {
             const response = await api.get(
-                `/api/ui/accounts/user/${userId}`
+                `/api/ui/accounts/user/${userId}`,
+                { signal: controller.signal }
             );
+            if (generation !== accountsRequestRef.current.generation) return;
 
             if (
                 response.data?.success &&
@@ -74,7 +93,8 @@ export const AccountProvider = ({ children }) => {
                     setAcctId('');
                     setAcctName('');
                     setSelectedAccount(null);
-                    setTimeout(() => setIsLinkDialogOpen(true), 400);
+                    clearTimeout(linkDialogTimerRef.current);
+                    linkDialogTimerRef.current = setTimeout(() => setIsLinkDialogOpen(true), 400);
                 } else {
                     setIsAccountLinked(true);
                     // Resolve active account: URL param → localStorage → first in list
@@ -93,27 +113,27 @@ export const AccountProvider = ({ children }) => {
                 setIsAccountLinked(false);
             }
         } catch (err) {
+            if (controller.signal.aborted || generation !== accountsRequestRef.current.generation) return;
             console.warn('[AccountContext] Failed to fetch accounts:', err.message);
             setIsAccountLinked(false);
             setAcctNo('');
             setAcctId('');
             setAcctName('');
             setSelectedAccount(null);
-            setTimeout(() => setIsLinkDialogOpen(true), 400);
+            clearTimeout(linkDialogTimerRef.current);
+            linkDialogTimerRef.current = setTimeout(() => setIsLinkDialogOpen(true), 400);
         } finally {
-            setAccountsLoading(false);
-            setAccountsLoaded(true);
+            if (generation === accountsRequestRef.current.generation) {
+                setAccountsLoading(false);
+                setAccountsLoaded(true);
+            }
         }
-    }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [user, location.search, location.pathname, navigate, applySelectedAccount]);
 
-    // Apply an account object as the selected/active account
-    const applySelectedAccount = (account) => {
-        setSelectedAccount(account);
-        setAcctNo(account.acctNo || '');
-        setAcctId(account.acctId || '');
-        setAcctName(account.accountName || '');
-        setAcctInLocalStorage(account.acctNo, account.acctId);
-    };
+    useEffect(() => () => {
+        accountsRequestRef.current.controller?.abort();
+        clearTimeout(linkDialogTimerRef.current);
+    }, []);
 
     // Run fetch after SSO auth completes
     useEffect(() => {
@@ -130,9 +150,11 @@ export const AccountProvider = ({ children }) => {
         const userId = user?.userId || localStorage.getItem('userId') || '';
         if (!acctId || !userId) return;
 
+        const controller = new AbortController();
         let cancelled = false;
+        setAdminResolved(false);
         (async () => {
-            const data = await resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId);
+            const data = await resolveChatbotAdmin(acctId, userId, setChatbotAdmin, setAdminId, controller.signal);
             if (cancelled) return;
             setAccessLevel(data?.accessLevel ?? null);
             setAdminResolved(true);
@@ -141,11 +163,11 @@ export const AccountProvider = ({ children }) => {
             const email = userDetails?.email || localStorage.getItem('userEmail') || '';
             const phone = userDetails?.phone || '';
             if (data && (email || phone)) {
-                api.post('/api/ui/admins/contact', { acctId, email, phone }).catch(() => { /* non-fatal */ });
+                api.post('/api/ui/admins/contact', { acctId, email, phone }, { signal: controller.signal }).catch(() => { /* non-fatal */ });
             }
         })();
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; controller.abort(); };
     }, [acctId, user, userDetails]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // When accounts have loaded but there is no active account, mark the admin
@@ -166,13 +188,13 @@ export const AccountProvider = ({ children }) => {
     }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Switch active account ──────────────────────────────────────────────────
-    const switchAccount = (account) => {
+    const switchAccount = useCallback((account) => {
         applySelectedAccount(account);
         updateUrlWithAcctNo(account.acctNo, navigate, location);
-    };
+    }, [applySelectedAccount, navigate, location]);
 
     // ── Called by LinkAccountDialog after a successful link ────────────────────
-    const handleAccountLinked = (formData) => {
+    const handleAccountLinked = useCallback((formData) => {
         const account = formData.account;
 
         if (account.timezone) {
@@ -195,30 +217,33 @@ export const AccountProvider = ({ children }) => {
         updateUrlWithAcctNo(newAccount.acctNo, navigate, location);
         setAccountsRefreshKey((k) => k + 1);
         showSuccess('Account linked successfully!');
-    };
+    }, [applySelectedAccount, navigate, location, showSuccess]);
+
+    const contextValue = useMemo(() => ({
+        accounts,
+        selectedAccount,
+        acctNo,
+        acctId,
+        acctName,
+        accountsLoaded,
+        accountsLoading,
+        isAccountLinked,
+        isLinkDialogOpen,
+        setIsLinkDialogOpen,
+        fetchAccounts,
+        switchAccount,
+        handleAccountLinked,
+    }), [
+        accounts, selectedAccount, acctNo, acctId, acctName, accountsLoaded,
+        accountsLoading, isAccountLinked, isLinkDialogOpen, fetchAccounts,
+        switchAccount, handleAccountLinked,
+    ]);
 
     return (
         <AccountContext.Provider
-            value={{
-                // State
-                accounts,
-                selectedAccount,
-                acctNo,
-                acctId,
-                acctName,
-                accountsLoaded,
-                accountsLoading,
-                isAccountLinked,
-                // Dialog control
-                isLinkDialogOpen,
-                setIsLinkDialogOpen,
-                // Actions
-                fetchAccounts,
-                switchAccount,
-                handleAccountLinked,
-            }}
+            value={contextValue}
         >
-            <NotificationComponent />
+            <NotificationViewport />
             {children}
         </AccountContext.Provider>
     );

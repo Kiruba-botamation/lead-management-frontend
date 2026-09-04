@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
@@ -13,11 +13,10 @@ import {
 import LoadingMask from '../components/LoadingMask';
 import DeleteConfirmation from '../components/DeleteConfirmation';
 import UITooltip from '../components/Tooltip';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import Button from '../components/ui/Button';
-import AiAnalyticsChat from '../components/AiAnalyticsChat';
 import AppNavbar from '../components/AppNavbar';
+
+const AiAnalyticsChat = React.lazy(() => import('../components/AiAnalyticsChat'));
 
 // ── Controlled dimension input for width/height ──
 const DimensionInput = ({ value, onCommit, min, max, className }) => {
@@ -63,6 +62,88 @@ const LabelInput = ({ initialValue, placeholder, onCommit }) => {
             }}
             onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
         />
+    );
+};
+
+let countdownClockNow = Date.now();
+let countdownClockInterval = null;
+const countdownClockSubscribers = new Set();
+
+const subscribeCountdownClock = (callback) => {
+    countdownClockSubscribers.add(callback);
+    if (!countdownClockInterval) {
+        countdownClockNow = Date.now();
+        countdownClockInterval = setInterval(() => {
+            countdownClockNow = Date.now();
+            countdownClockSubscribers.forEach(subscriber => subscriber());
+        }, 1000);
+    }
+    return () => {
+        countdownClockSubscribers.delete(callback);
+        if (countdownClockSubscribers.size === 0 && countdownClockInterval) {
+            clearInterval(countdownClockInterval);
+            countdownClockInterval = null;
+        }
+    };
+};
+
+const getCountdownClockSnapshot = () => countdownClockNow;
+
+const AutoRefreshCountdown = ({ chartId, minutes, onRefresh }) => {
+    const totalSecs = minutes * 60;
+    const now = useSyncExternalStore(subscribeCountdownClock, getCountdownClockSnapshot, getCountdownClockSnapshot);
+    const [deadline, setDeadline] = useState(() => Date.now() + totalSecs * 1000);
+    const onRefreshRef = useRef(onRefresh);
+    const triggeredDeadlineRef = useRef(null);
+
+    onRefreshRef.current = onRefresh;
+
+    useEffect(() => {
+        triggeredDeadlineRef.current = null;
+        setDeadline(Date.now() + totalSecs * 1000);
+    }, [chartId, totalSecs]);
+
+    const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+
+    useEffect(() => {
+        if (remaining > 0 || triggeredDeadlineRef.current === deadline) return;
+        triggeredDeadlineRef.current = deadline;
+        setDeadline(Date.now() + totalSecs * 1000);
+        onRefreshRef.current();
+    }, [deadline, remaining, totalSecs]);
+
+    const progress = remaining / totalSecs;
+    const radius = 8;
+    const circumference = 2 * Math.PI * radius;
+    const dash = circumference * progress;
+    const formatted = remaining >= 60
+        ? `${Math.floor(remaining / 60)}m${remaining % 60 > 0 ? String(remaining % 60).padStart(2, '0') + 's' : ''}`
+        : `${remaining}s`;
+    const intervalLabel = totalSecs < 60 ? `${totalSecs}s` : totalSecs < 3600 ? `${Math.round(totalSecs / 60)}m` : '1h';
+
+    return (
+        <UITooltip content={`Auto-refresh in ${formatted} (every ${intervalLabel})`} placement="top">
+            <div
+                className="flex items-center gap-1 shrink-0 select-none"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => { event.stopPropagation(); onRefreshRef.current(); }}
+            >
+                <svg width="20" height="20" viewBox="0 0 20 20" className="cursor-pointer">
+                    <circle cx="10" cy="10" r={radius} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="2" />
+                    <circle
+                        cx="10" cy="10" r={radius}
+                        fill="none"
+                        stroke={progress > 0.25 ? '#6ee7b7' : '#f87171'}
+                        strokeWidth="2"
+                        strokeDasharray={`${dash} ${circumference}`}
+                        strokeLinecap="round"
+                        transform="rotate(-90 10 10)"
+                        style={{ transition: 'stroke-dasharray 0.9s linear' }}
+                    />
+                </svg>
+                <span className="text-[9px] font-mono text-gray-400 min-w-[22px]">{formatted}</span>
+            </div>
+        </UITooltip>
     );
 };
 
@@ -316,6 +397,30 @@ const AnalyticsDashboardPage = () => {
         }
     };
 
+    const pendingDashboardSaveRef = React.useRef(null);
+    const dashboardSaveTimerRef = React.useRef(null);
+
+    const flushPendingDashboardSave = () => {
+        if (dashboardSaveTimerRef.current) {
+            clearTimeout(dashboardSaveTimerRef.current);
+            dashboardSaveTimerRef.current = null;
+        }
+        const pending = pendingDashboardSaveRef.current;
+        if (!pending) return;
+        pendingDashboardSaveRef.current = null;
+        saveCharts(pending.acct, pending.viewingAsUserId, pending.chartsData);
+    };
+
+    const scheduleDashboardSave = (acct, viewingAsUserId, chartsData) => {
+        const pending = pendingDashboardSaveRef.current;
+        if (pending && (pending.acct !== acct || pending.viewingAsUserId !== viewingAsUserId)) {
+            flushPendingDashboardSave();
+        }
+        pendingDashboardSaveRef.current = { acct, viewingAsUserId, chartsData };
+        if (dashboardSaveTimerRef.current) clearTimeout(dashboardSaveTimerRef.current);
+        dashboardSaveTimerRef.current = setTimeout(flushPendingDashboardSave, 350);
+    };
+
     // Re-compute dateFrom/dateTo for a given preset as of right now.
     // Called on restore so relative presets (today, thisweek, …) always reflect
     // the current date rather than the stale date stored in localStorage.
@@ -398,14 +503,14 @@ const AnalyticsDashboardPage = () => {
     const [charts, setCharts] = useState([]);
     const [chartRequestSignatures, setChartRequestSignatures] = useState({});
     const [nextChartId, setNextChartId] = useState(1);
-    const [chartDataCache, setChartDataCache] = useState({});
+    const chartDataCacheRef = React.useRef({});
+    const [, setChartDataCacheRevision] = useState(0);
     const [chartLoadingState, setChartLoadingState] = useState({});
-    // Auto-refresh: per-chart countdown seconds remaining
-    const [autoRefreshCountdown, setAutoRefreshCountdown] = useState({});
-    const autoRefreshIntervalsRef = React.useRef({});
-    const chartsForTimerRef = React.useRef([]);
     const acctIdRef = React.useRef(acctId);
     const viewingAsRef = React.useRef(null);
+    const chartRequestsRef = React.useRef({});
+    const chartRequestContextGenerationRef = React.useRef(0);
+    const chartRequestContextKeyRef = React.useRef(null);
     const skipViewingAsEffectRef = React.useRef(false); // set by handleViewAsChange when it already loaded charts, to prevent the viewingAs useEffect from doing duplicate work
     const adminsLoadedForAcctRef = React.useRef(null); // prevents the admins effect from running more than once per account
     const draggedIdRef = React.useRef(null);
@@ -416,6 +521,16 @@ const AnalyticsDashboardPage = () => {
     const isResizingRef = React.useRef(false);
     const [dragHeights, setDragHeights] = useState({});
     const [dragWidths, setDragWidths] = useState({});
+
+    const updateChartDataCache = (chartId, data) => {
+        chartDataCacheRef.current[chartId] = data;
+        setChartDataCacheRevision(revision => revision + 1);
+    };
+
+    const clearChartDataCache = () => {
+        chartDataCacheRef.current = {};
+        setChartDataCacheRevision(revision => revision + 1);
+    };
 
     // Pending (draft) chart configs — changes inside the slider that haven't been applied yet
     const [pendingChartConfigs, setPendingChartConfigs] = useState({});
@@ -675,6 +790,16 @@ const AnalyticsDashboardPage = () => {
         return payload ? JSON.stringify(payload) : null;
     };
 
+    const updateChartRequestContext = (nextAcctId, nextViewingAs) => {
+        const contextKey = `${nextAcctId || ''}:${nextViewingAs || ''}`;
+        if (chartRequestContextKeyRef.current === contextKey) return;
+        chartRequestContextKeyRef.current = contextKey;
+        chartRequestContextGenerationRef.current += 1;
+        Object.values(chartRequestsRef.current).forEach(request => request.controller.abort());
+        chartRequestsRef.current = {};
+        setChartLoadingState({});
+    };
+
     const isChartRequestDirty = (chartConfig) => {
         const signature = getChartRequestSignature(chartConfig);
         return !!signature && chartRequestSignatures[chartConfig.id] !== signature;
@@ -748,12 +873,32 @@ const AnalyticsDashboardPage = () => {
     // silent=true skips the per-chart loading mask (used by auto-refresh)
     const fetchChartDataFromBackend = async (chartId, chartConfig, silent = false, markClean = false) => {
         const currentAcctId = acctIdRef.current;
+        const currentViewingAs = viewingAsRef.current;
         const isNumber = chartConfig.chartType?.value === 'number';
         if (isNumber ? (!chartConfig.yAxis || !chartConfig.aggregation) : (!chartConfig.xAxis || !chartConfig.yAxis || !chartConfig.aggregation)) {
             return;
         }
 
         const requestSignature = getChartRequestSignature(chartConfig);
+        const previousRequest = chartRequestsRef.current[chartId];
+        if (previousRequest) previousRequest.controller.abort();
+        const controller = new AbortController();
+        const request = {
+            controller,
+            generation: (previousRequest?.generation || 0) + 1,
+            contextGeneration: chartRequestContextGenerationRef.current,
+            acctId: currentAcctId,
+            viewingAs: currentViewingAs,
+            signature: requestSignature,
+        };
+        chartRequestsRef.current[chartId] = request;
+        const isCurrentRequest = () => {
+            if (chartRequestsRef.current[chartId] !== request) return false;
+            if (chartRequestContextGenerationRef.current !== request.contextGeneration) return false;
+            if (acctIdRef.current !== request.acctId || viewingAsRef.current !== request.viewingAs) return false;
+            const latestChart = chartsRef.current.find(chart => chart.id === chartId);
+            return !!latestChart && getChartRequestSignature(latestChart) === request.signature;
+        };
         if (markClean && requestSignature) {
             setChartRequestSignatures(prev => ({ ...prev, [chartId]: requestSignature }));
         }
@@ -774,10 +919,11 @@ const AnalyticsDashboardPage = () => {
                 ...(chartConfig.dateFilterTo && { dateTo: chartConfig.dateFilterTo }),
                 dateFilterField: chartConfig.dateFilterField || (isDateAxis ? xAxisValue : 'updatedAt'),
                 ...(isDateAxis ? { dateGranularity: chartConfig.dateGranularity || 'day' } : {}),
-                ...(viewingAsRef.current && { viewingAs: viewingAsRef.current })
+                ...(currentViewingAs && { viewingAs: currentViewingAs })
             };
 
-            const response = await api.post('/api/ui/analytics/chart-data', params);
+            const response = await api.post('/api/ui/analytics/chart-data', params, { signal: controller.signal });
+            if (!isCurrentRequest()) return;
             const data = response.data.data || [];
             // For date-axis charts sort chronologically; otherwise sort by value descending
             if (isDateAxis) {
@@ -786,20 +932,18 @@ const AnalyticsDashboardPage = () => {
                 data.sort((a, b) => b.value - a.value);
             }
 
-            setChartDataCache(prev => ({
-                ...prev,
-                [chartId]: data
-            }));
+            updateChartDataCache(chartId, data);
         } catch (err) {
+            if (controller.signal.aborted || !isCurrentRequest()) return;
             console.error('Error fetching chart data:', err);
-            setChartDataCache(prev => ({
-                ...prev,
-                [chartId]: []
-            }));
+            updateChartDataCache(chartId, []);
             // Clear in-flight flag on error so slider stays open (auto-hide only on success)
             delete userFetchInFlightRef.current[chartId];
         } finally {
-            if (!silent) setChartLoadingState(prev => ({ ...prev, [chartId]: false }));
+            if (chartRequestsRef.current[chartId] === request) {
+                delete chartRequestsRef.current[chartId];
+                if (!silent) setChartLoadingState(prev => ({ ...prev, [chartId]: false }));
+            }
         }
     };
 
@@ -861,7 +1005,6 @@ const AnalyticsDashboardPage = () => {
                 setNextChartId(maxId + 1 + additions.length);
             }
 
-            saveCharts(acctId, viewingAs, updated);
             return updated;
         });
         setHasUnsavedChanges(true);
@@ -909,6 +1052,8 @@ const AnalyticsDashboardPage = () => {
 
     // Remove chart
     const removeChart = (chartId) => {
+        chartRequestsRef.current[chartId]?.controller.abort();
+        delete chartRequestsRef.current[chartId];
         setCharts(prev => prev.filter(chart => chart.id !== chartId));
         setChartRequestSignatures(prev => {
             const next = { ...prev };
@@ -976,7 +1121,7 @@ const AnalyticsDashboardPage = () => {
                 setCharts(restored);
                 setNextChartId(restored.length > 0 ? Math.max(...restored.map(c => c.id)) + 1 : 1);
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
-                setChartDataCache({});
+                clearChartDataCache();
 
                 // Fetch field schemas and chart data for restored charts
                 const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
@@ -1001,7 +1146,7 @@ const AnalyticsDashboardPage = () => {
                 setCharts([]);
                 setNextChartId(1);
                 setChartRequestSignatures({});
-                setChartDataCache({});
+                clearChartDataCache();
                 // Nothing to save after clearing
                 setHasUnsavedChanges(false);
             }
@@ -1034,6 +1179,7 @@ const AnalyticsDashboardPage = () => {
         if (!acctId) return;
         setSchemaSaving(true);
         try {
+            flushPendingDashboardSave();
             // Always save under the current logged-in user's lead-app userId.
             const userId = rawUser?.userId || localStorage.getItem('userId');
 
@@ -1110,22 +1256,17 @@ const AnalyticsDashboardPage = () => {
         if (!chartIds.length) return;
         setPdfDownloading(true);
         try {
+            const [{ default: jsPDF }, { toPng }] = await Promise.all([
+                import('jspdf'),
+                import('html-to-image')
+            ]);
             const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
             const pageWidth = pdf.internal.pageSize.getWidth();
             const pageHeight = pdf.internal.pageSize.getHeight();
             const margin = 24;
             let firstPage = true;
 
-            // Off-screen capture container — fixed large size so flex children aren't clipped
-            const offscreenHost = document.createElement('div');
-            offscreenHost.style.cssText = [
-                'position:fixed', 'left:-9999px', 'top:0',
-                'width:1200px',   // wide enough to avoid responsive wrapping
-                'background:#ffffff',
-                'z-index:-1',
-                'pointer-events:none',
-            ].join(';');
-            document.body.appendChild(offscreenHost);
+            if (document.fonts?.ready) await document.fonts.ready;
 
             for (const id of chartIds) {
                 const el = cardRefs.current[id];
@@ -1137,51 +1278,19 @@ const AnalyticsDashboardPage = () => {
                 // Grab only the chart content area
                 const contentEl = el.querySelector('[data-pdf-content]') || el;
 
-                // Deep-clone into the off-screen host with all computed styles resolved
-                const clone = contentEl.cloneNode(true);
-                // Remove any elements tagged data-pdf-hide from the clone
-                clone.querySelectorAll('[data-pdf-hide]').forEach(n => n.remove());
-                // Release ALL height/overflow constraints so the full flex column renders
-                const releaseConstraints = (node) => {
-                    if (node.style) {
-                        node.style.height = 'auto';
-                        node.style.maxHeight = 'none';
-                        node.style.overflow = 'visible';
-                        node.style.minHeight = '0';
-                    }
-                    // Also strip Tailwind classes that clip height
-                    if (node.classList) {
-                        ['h-full', 'min-h-0', 'overflow-hidden', 'overflow-y-hidden', 'overflow-x-hidden'].forEach(c => node.classList.remove(c));
-                    }
-                };
-                releaseConstraints(clone);
-                // Release first two levels of children (the p-4 wrapper and the chart flex root)
-                clone.querySelectorAll('*').forEach(releaseConstraints);
-                // Give SVGs explicit pixel dimensions so Recharts renders them fully
-                clone.querySelectorAll('svg').forEach(svg => {
-                    const rect = svg.getBoundingClientRect();
-                    if (rect.width > 0) svg.setAttribute('width', rect.width);
-                    if (rect.height > 0) svg.setAttribute('height', rect.height);
-                });
+                const rect = contentEl.getBoundingClientRect();
+                if (!rect.width || !rect.height) continue;
 
-                offscreenHost.innerHTML = '';
-                offscreenHost.appendChild(clone);
-
-                // Allow a tick for the browser to lay out
-                await new Promise(r => setTimeout(r, 80));
-
-                const canvas = await html2canvas(clone, {
-                    scale: 2,
-                    useCORS: true,
+                // Capture the live chart so its SVG geometry and visible layout stay intact.
+                const imgData = await toPng(contentEl, {
+                    pixelRatio: 2,
+                    cacheBust: true,
                     backgroundColor: '#ffffff',
-                    logging: false,
-                    width: clone.scrollWidth,
-                    height: clone.scrollHeight,
-                    windowWidth: 1200,
+                    width: rect.width,
+                    height: rect.height,
+                    filter: node => !(node instanceof HTMLElement && node.dataset.pdfHide === 'true'),
                 });
-
-                const imgData = canvas.toDataURL('image/png');
-                const imgAspect = canvas.width / canvas.height;
+                const imgAspect = rect.width / rect.height;
 
                 // Header block: title + date label
                 const headerH = dateLabel ? 42 : 28;
@@ -1219,7 +1328,7 @@ const AnalyticsDashboardPage = () => {
                 pdf.addImage(imgData, 'PNG', x, y, drawW, drawH);
             }
 
-            document.body.removeChild(offscreenHost);
+            if (firstPage) throw new Error('No visible charts were available to export.');
             pdf.save('analytics-charts.pdf');
         } catch (err) {
             console.error('PDF generation failed:', err);
@@ -1229,12 +1338,7 @@ const AnalyticsDashboardPage = () => {
     };
 
 
-    // Keep chartsForTimerRef current so the interval callbacks always use latest chart state
-    useEffect(() => {
-        chartsForTimerRef.current = charts;
-    }, [charts]);
-
-    // Keep acctIdRef current so interval callbacks always use the latest acctId
+    // Keep request context refs current before account/view chart-loading effects run.
     useEffect(() => {
         acctIdRef.current = acctId;
     }, [acctId]);
@@ -1246,79 +1350,10 @@ const AnalyticsDashboardPage = () => {
         setSchemaSavedOnce(false);
     }, [viewingAs]);
 
-    // Auto-refresh timer manager — starts/restarts a countdown for each chart
-    // No cleanup on dep change: each chart's timer is managed individually inside the body.
+    // Invalidate every chart request when its account or viewed admin changes.
     useEffect(() => {
-        const activeIds = new Set(charts.map(c => c.id));
-
-        // Clear intervals for removed charts (skip _total keys)
-        Object.keys(autoRefreshIntervalsRef.current)
-            .filter(k => !k.includes('_total'))
-            .forEach(idStr => {
-                const id = Number(idStr);
-                if (!activeIds.has(id)) {
-                    clearInterval(autoRefreshIntervalsRef.current[idStr]);
-                    delete autoRefreshIntervalsRef.current[idStr];
-                    delete autoRefreshIntervalsRef.current[`${idStr}_total`];
-                    setAutoRefreshCountdown(prev => { const n = { ...prev }; delete n[id]; return n; });
-                }
-            });
-
-        charts.forEach(chart => {
-            // Auto-refresh disabled for this chart — clear any running timer
-            if (!chart.autoRefreshMins) {
-                if (autoRefreshIntervalsRef.current[chart.id]) {
-                    clearInterval(autoRefreshIntervalsRef.current[chart.id]);
-                    delete autoRefreshIntervalsRef.current[chart.id];
-                    delete autoRefreshIntervalsRef.current[`${chart.id}_total`];
-                    setAutoRefreshCountdown(prev => { const n = { ...prev }; delete n[chart.id]; return n; });
-                }
-                return;
-            }
-
-            const mins = chart.autoRefreshMins;
-            const totalSecs = mins * 60;
-            const existingInterval = autoRefreshIntervalsRef.current[chart.id];
-
-            // Skip if this chart's interval is already running with the same timing
-            const currentCountdown = autoRefreshIntervalsRef.current[`${chart.id}_total`];
-            if (existingInterval && currentCountdown === totalSecs) return;
-
-            // Timing changed — clear only this chart's old interval
-            if (existingInterval) clearInterval(existingInterval);
-
-            autoRefreshIntervalsRef.current[`${chart.id}_total`] = totalSecs;
-            setAutoRefreshCountdown(prev => ({ ...prev, [chart.id]: totalSecs }));
-
-            autoRefreshIntervalsRef.current[chart.id] = setInterval(() => {
-                setAutoRefreshCountdown(prev => {
-                    const remaining = (prev[chart.id] ?? totalSecs) - 1;
-                    if (remaining <= 0) {
-                        // Trigger refresh using latest chart state from ref
-                        const latestChart = chartsForTimerRef.current.find(c => c.id === chart.id);
-                        const isNumberChart = latestChart?.chartType?.value === 'number';
-                        if (latestChart && (isNumberChart ? (latestChart.yAxis && latestChart.aggregation) : (latestChart.xAxis && latestChart.yAxis && latestChart.aggregation))) {
-                            fetchChartDataFromBackend(latestChart.id, latestChart, true);
-                        }
-                        autoRefreshIntervalsRef.current[`${chart.id}_total`] = totalSecs;
-                        return { ...prev, [chart.id]: totalSecs };
-                    }
-                    return { ...prev, [chart.id]: remaining };
-                });
-            }, 1000);
-        });
-        // No return/cleanup here — we handle per-chart cleanup above
-        // Global cleanup on unmount is handled by the effect below
-    }, [charts.map(c => `${c.id}:${c.autoRefreshMins ?? 'off'}`).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Clear all auto-refresh intervals on component unmount only
-    useEffect(() => {
-        return () => {
-            Object.keys(autoRefreshIntervalsRef.current)
-                .filter(k => !k.includes('_total'))
-                .forEach(k => clearInterval(autoRefreshIntervalsRef.current[k]));
-        };
-    }, []);
+        updateChartRequestContext(acctId, viewingAs);
+    }, [acctId, viewingAs]);
 
     // Safety net: if chartsReady is still false after 10 s (auth/admins chain stuck),
     // unblock the UI so the user isn't trapped on the loading mask indefinitely.
@@ -1357,7 +1392,7 @@ const AnalyticsDashboardPage = () => {
         setChartsReady(true);
         setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
         setNextChartId(restored.length > 0 ? Math.max(...restored.map(c => c.id)) + 1 : 1);
-        setChartDataCache({});
+        clearChartDataCache();
         setCollectionFieldsCache({});
         fieldsFetchPromisesRef.current = {};
 
@@ -1374,13 +1409,31 @@ const AnalyticsDashboardPage = () => {
         });
     }, [acctId, viewingAs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Persist charts whenever they change (skip on load)
+    // Persist charts after edits settle, and invalidate requests for superseded configs.
     useEffect(() => {
         chartsRef.current = charts; // always keep ref current
+        const staleRequestIds = [];
+        Object.entries(chartRequestsRef.current).forEach(([id, request]) => {
+            const latestChart = charts.find(chart => chart.id === Number(id));
+            if (!latestChart || getChartRequestSignature(latestChart) !== request.signature) {
+                request.controller.abort();
+                delete chartRequestsRef.current[id];
+                staleRequestIds.push(Number(id));
+            }
+        });
+        if (staleRequestIds.length > 0) {
+            setChartLoadingState(prev => {
+                const next = { ...prev };
+                staleRequestIds.forEach(id => { next[id] = false; });
+                return next;
+            });
+        }
         if (skipSaveRef.current) { skipSaveRef.current = false; return; }
         if (!acctId || !viewingAs) return;
-        saveCharts(acctId, viewingAs, charts);
+        scheduleDashboardSave(acctId, viewingAs, charts);
     }, [charts, acctId, viewingAs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => () => flushPendingDashboardSave(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Fetch collections
     const fetchCollections = async () => {
@@ -1514,6 +1567,8 @@ const AnalyticsDashboardPage = () => {
             // Extract viewingAs and schema from backend response
             const viewingAsId = response.data?.viewingAs || null;
             const schema = response.data?.schema || null;
+            viewingAsRef.current = viewingAsId;
+            updateChartRequestContext(acctId, viewingAsId);
 
             // If backend returned a schema, save it to localStorage — but only when NOT
             // switching back to own admin. For own admin, localStorage is the source of truth
@@ -1529,7 +1584,7 @@ const AnalyticsDashboardPage = () => {
                 setCharts(restored);
                 setNextChartId(restored.length > 0 ? Math.max(...restored.map(c => c.id)) + 1 : 1);
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
-                setChartDataCache({});
+                clearChartDataCache();
 
                 const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
                 usedCollections.forEach(catId => fetchFieldsForCollection(catId));
@@ -1555,7 +1610,7 @@ const AnalyticsDashboardPage = () => {
                 setCharts(restored);
                 setNextChartId(restored.length > 0 ? Math.max(...restored.map(c => c.id)) + 1 : 1);
                 setChartRequestSignatures(Object.fromEntries(restored.map(chart => [chart.id, getChartRequestSignature(chart)])));
-                setChartDataCache({});
+                clearChartDataCache();
 
                 // Fetch field schemas for used collections
                 const usedCollections = [...new Set(restored.map(c => c.chartCollection?._id || c.chartCollection).filter(Boolean))];
@@ -1656,7 +1711,7 @@ const AnalyticsDashboardPage = () => {
 
     // Get chart data from cache
     const getChartData = (chartConfig, chartId) => {
-        return chartDataCache[chartId] || [];
+        return chartDataCacheRef.current[chartId] || [];
     };
 
     // High-contrast palette ordered to keep adjacent series visually distinct.
@@ -2830,44 +2885,13 @@ const AnalyticsDashboardPage = () => {
                     )}
 
                     {/* Auto-refresh countdown arc — only shown when auto-refresh is enabled */}
-                    {chartConfig.autoRefreshMins && (() => {
-                        const mins = chartConfig.autoRefreshMins;
-                        const totalSecs = mins * 60;
-                        const remaining = autoRefreshCountdown[chartConfig.id] ?? totalSecs;
-                        const progress = remaining / totalSecs; // 1 = full, 0 = trigger
-                        const r = 8;
-                        const circ = 2 * Math.PI * r;
-                        const dash = circ * progress;
-                        const fmt = remaining >= 60
-                            ? `${Math.floor(remaining / 60)}m${remaining % 60 > 0 ? String(remaining % 60).padStart(2, '0') + 's' : ''}`
-                            : `${remaining}s`;
-                        return (
-                            <UITooltip content={`Auto-refresh in ${fmt} (every ${totalSecs < 60 ? `${totalSecs}s` : totalSecs < 3600 ? `${Math.round(totalSecs / 60)}m` : '1h'})`} placement="top">
-                                <div
-                                    className="flex items-center gap-1 shrink-0 select-none"
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => { e.stopPropagation(); fetchChartDataFromBackend(chartConfig.id, chartConfig); }}
-                                >
-                                    <svg width="20" height="20" viewBox="0 0 20 20" className="cursor-pointer">
-                                        {/* Track */}
-                                        <circle cx="10" cy="10" r={r} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="2" />
-                                        {/* Progress arc */}
-                                        <circle
-                                            cx="10" cy="10" r={r}
-                                            fill="none"
-                                            stroke={progress > 0.25 ? '#6ee7b7' : '#f87171'}
-                                            strokeWidth="2"
-                                            strokeDasharray={`${dash} ${circ}`}
-                                            strokeLinecap="round"
-                                            transform="rotate(-90 10 10)"
-                                            style={{ transition: 'stroke-dasharray 0.9s linear' }}
-                                        />
-                                    </svg>
-                                    <span className="text-[9px] font-mono text-gray-400 min-w-[22px]">{fmt}</span>
-                                </div>
-                            </UITooltip>
-                        );
-                    })()}
+                    {chartConfig.autoRefreshMins && (
+                        <AutoRefreshCountdown
+                            chartId={chartConfig.id}
+                            minutes={chartConfig.autoRefreshMins}
+                            onRefresh={() => fetchChartDataFromBackend(chartConfig.id, chartConfig, true)}
+                        />
+                    )}
                 </div>
 
                 {/* ── All controls — slides in when near top ──
@@ -3795,14 +3819,18 @@ const AnalyticsDashboardPage = () => {
             </div>
 
             {/* AI Chart Assistant panel */}
-            <AiAnalyticsChat
-                isOpen={aiChatOpen}
-                onClose={() => setAiChatOpen(false)}
-                acctId={acctId}
-                collections={collections}
-                currentCharts={charts}
-                onAddCharts={handleAiChartsGenerated}
-            />
+            {aiChatOpen && (
+                <React.Suspense fallback={null}>
+                    <AiAnalyticsChat
+                        isOpen={aiChatOpen}
+                        onClose={() => setAiChatOpen(false)}
+                        acctId={acctId}
+                        collections={collections}
+                        currentCharts={charts}
+                        onAddCharts={handleAiChartsGenerated}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Delete confirmation dialog */}
             <DeleteConfirmation

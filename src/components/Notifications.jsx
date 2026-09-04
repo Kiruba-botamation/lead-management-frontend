@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useEffect, useCallback } from 'react';
+import React, { Fragment, useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import ReactDOM from 'react-dom';
 import { Transition } from '@headlessui/react';
 
@@ -62,9 +62,11 @@ function getIcon(type) {
  * @param {function} onClose       - Called when dismissed
  * @param {function} [onClick]     - Called when the toast body is clicked (reminder type)
  */
-export default function Notify({ message, type, key, onClose, onClick }) {
+export default function Notify({ id, message, type, onClose, onClick }) {
     const [show,     setShow]     = useState(true);
     const [progress, setProgress] = useState(100);
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
 
     const duration = AUTO_CLOSE_MS[type];  // undefined → no auto-close
     const theme    = THEME[type] || { accent: 'var(--color-gray-400)', tint: 'var(--color-gray-50)', label: '' };
@@ -88,23 +90,23 @@ export default function Notify({ message, type, key, onClose, onClick }) {
 
         const closeTimer = setTimeout(() => {
             setShow(false);
-            setTimeout(onClose, 200);
+            setTimeout(() => onCloseRef.current(), 200);
         }, duration);
 
         return () => { clearInterval(progressTimer); clearTimeout(closeTimer); };
-    }, [key, type, onClose, message]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [id, type, duration]);
 
     const handleClose = (e) => {
         e.stopPropagation();
         setShow(false);
-        onClose();
+        onCloseRef.current();
     };
 
     const handleBodyClick = () => {
         if (onClick) {
             onClick();
             setShow(false);
-            onClose();
+            onCloseRef.current();
         }
     };
 
@@ -213,58 +215,70 @@ export default function Notify({ message, type, key, onClose, onClick }) {
     );
 }
 
-// ── useNotifications hook ─────────────────────────────────────────────────────
+// ── Shared notification store ─────────────────────────────────────────────────
 
-export const useNotifications = () => {
-    const [notification,    setNotification]    = useState(null);
-    const [notificationKey, setNotificationKey] = useState(0);
+const MAX_NOTIFICATION_HISTORY = 20;
+let nextNotificationId = 1;
+let notifications = [];
+const listeners = new Set();
 
-    const bump = () => setNotificationKey(k => k + 1);
+const emit = () => listeners.forEach(listener => listener());
+const subscribe = (listener) => { listeners.add(listener); return () => listeners.delete(listener); };
+const getSnapshot = () => notifications;
 
-    const showSuccess = useCallback((message) => {
-        setNotification({ message: { title: 'Success', description: message }, type: 'success' });
-        bump();
-    }, []);
+const addNotification = (message, type, onClick = null) => {
+    notifications = [
+        ...notifications,
+        { id: nextNotificationId++, message, type, onClick },
+    ].slice(-MAX_NOTIFICATION_HISTORY);
+    emit();
+};
 
-    const showError = useCallback((message) => {
-        setNotification({ message: { title: 'Error', description: message }, type: 'error' });
-        bump();
-    }, []);
+const clearNotification = (id) => {
+    notifications = id == null ? [] : notifications.filter(item => item.id !== id);
+    emit();
+};
 
-    const showWarning = useCallback((message) => {
-        setNotification({ message: { title: 'Warning', description: message }, type: 'warning' });
-        bump();
-    }, []);
+const notificationActions = Object.freeze({
+    showSuccess: (message) => addNotification({ title: 'Success', description: message }, 'success'),
+    showError: (message) => addNotification({ title: 'Error', description: message }, 'error'),
+    showWarning: (message) => addNotification({ title: 'Warning', description: message }, 'warning'),
+    showReminder: (payload, onClickCb) => addNotification(payload, 'reminder', onClickCb || null),
+    clearNotification: () => clearNotification(),
+});
 
-    /**
-     * Show a violet reminder/notification toast.
-     * @param {{ leadId, leadName, leadPhone, description, isPre }} payload
-     * @param {function} [onClickCb] — called when user clicks the toast body
-     */
-    const showReminder = useCallback((payload, onClickCb) => {
-        setNotification({ message: payload, type: 'reminder', onClick: onClickCb || null });
-        bump();
-    }, []);
+/** The one app-level owner for the notification portal. */
+export function NotificationViewport() {
+    const currentNotifications = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-    const clearNotification = useCallback(() => setNotification(null), []);
+    if (typeof document === 'undefined') return null;
 
-    const NotificationComponent = () => ReactDOM.createPortal(
+    return ReactDOM.createPortal(
         <div
-            className="pointer-events-none fixed top-0 left-0 w-full flex justify-center px-4"
+            className="pointer-events-none fixed top-0 left-0 w-full flex flex-col items-center gap-2 px-4"
             style={{ paddingTop: 'var(--space-2)', zIndex: 'var(--z-toast)' }}
         >
-            {notification && (
+            {currentNotifications.map(notification => (
                 <Notify
-                    key={notificationKey}
+                    key={notification.id}
+                    id={notification.id}
                     message={notification.message}
                     type={notification.type}
                     onClick={notification.onClick}
-                    onClose={clearNotification}
+                    onClose={() => clearNotification(notification.id)}
                 />
-            )}
+            ))}
         </div>,
         document.body
     );
+}
 
-    return { showSuccess, showError, showWarning, showReminder, clearNotification, NotificationComponent };
-};
+/**
+ * Stable compatibility component for existing callers. Rendering is centralized
+ * in NotificationViewport, so legacy per-hook owners intentionally render nothing.
+ */
+export function NotificationComponent() { return null; }
+
+const notificationsApi = Object.freeze({ ...notificationActions, NotificationComponent });
+
+export const useNotifications = () => notificationsApi;
