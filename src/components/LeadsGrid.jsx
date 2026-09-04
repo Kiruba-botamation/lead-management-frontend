@@ -1907,9 +1907,15 @@ const LeadsGrid = () => {
                 style={{ left, width: STAGE_PIN_W, minWidth: STAGE_PIN_W, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.06)', backgroundColor: '#ffffff' }}
             >
                 {stage ? (
-                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full" style={{ backgroundColor: tint(stage.color, 0.28) }}>
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stage.color }} />
-                        <span className="truncate text-gray-800">{stage.name}</span>
+                    <div className="inline-flex max-w-full items-center gap-2" title={stage.name}>
+                        <span className="relative h-5 w-5 shrink-0" aria-hidden="true">
+                            <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-slate-200" />
+                            <span
+                                className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-2 border-white shadow-[0_0_0_1px_rgba(15,23,42,0.08)]"
+                                style={{ backgroundColor: stage.color }}
+                            />
+                        </span>
+                        <span className="truncate text-[11px] font-semibold text-slate-600">{stage.name}</span>
                     </div>
                 ) : (
                     <span className="text-gray-400">—</span>
@@ -2245,7 +2251,12 @@ const LeadsGrid = () => {
                                                                 )}
                                                                 {hasStageCol && (
                                                                     <th className="px-3 py-2.5 text-left align-middle sticky z-30 bg-white/90 backdrop-blur-xl" style={{ left: STAGE_LEFT, width: STAGE_PIN_W, minWidth: STAGE_PIN_W, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
-                                                                        <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Stage</span>
+                                                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                                                                            <svg className="h-3.5 w-3.5 text-slate-400" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                                                                <path d="M2 8h12M5 5l3 3-3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                                                                            </svg>
+                                                                            Stage
+                                                                        </span>
                                                                     </th>
                                                                 )}
                                                                 {gridFields.map(field => {
