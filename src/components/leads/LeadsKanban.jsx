@@ -212,7 +212,7 @@ const KanbanCard = ({
                     {moveOpen && (
                         <div className="absolute right-0 bottom-7 z-40 w-44 max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl py-1">
                             {stages.map(s => (
-                                <button key={s.id} type="button" onClick={() => { if (Number(s.id) !== Number(lead.stage)) onMoveStage(lead, Number(s.id)); setMoveOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${Number(s.id) === Number(lead.stage) ? 'bg-indigo-50' : ''}`}>
+                                <button key={s.id} type="button" onClick={() => { if (String(s.id) !== String(lead.stage)) onMoveStage(lead, s.id); setMoveOpen(false); }} className={`w-full px-3 py-1.5 flex items-center gap-2 text-left text-xs hover:bg-gray-50 ${String(s.id) === String(lead.stage) ? 'bg-indigo-50' : ''}`}>
                                     <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                                     <span className="truncate text-gray-700">{s.name}</span>
                                 </button>
@@ -412,26 +412,34 @@ const KanbanColumn = ({
 // ── Add-stage column ────────────────────────────────────────────────────────
 const AddStageColumn = ({ busy, onAdd }) => {
     const [adding, setAdding] = useState(false);
+    const [id, setId]         = useState('');
+    const [idEdited, setIdEdited] = useState(false);
     const [name, setName]     = useState('');
     const [color, setColor]   = useState('#4f46e5');
 
-    const submit = () => { if (name.trim()) { onAdd(name.trim(), color); setName(''); setColor('#4f46e5'); setAdding(false); } };
+    const submit = () => { if (name.trim()) { onAdd(name.trim(), color, id.trim()); setId(''); setIdEdited(false); setName(''); setColor('#4f46e5'); setAdding(false); } };
 
     return (
         <div className="w-64 shrink-0 flex flex-col">
             {adding ? (
                 <div className="rounded-xl border border-dashed border-gray-300 bg-white p-2.5 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                        <StageColorPicker value={color} onChange={setColor} label="Choose new stage color" />
-                        <input
-                            autoFocus value={name} onChange={(e) => setName(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setAdding(false); setName(''); } }}
-                            placeholder="Stage name" className="ds-input ds-input--sm flex-1 min-w-0"
-                        />
+                    <div className="flex items-end gap-2">
+                        <div className="pb-0.5"><StageColorPicker value={color} onChange={setColor} label="Choose new stage color" /></div>
+                        <label className="w-20 min-w-0">
+                            <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage ID</span>
+                            <input value={id} onChange={(e) => { setIdEdited(true); setId(e.target.value.replace(/[^A-Za-z0-9]/g, '')); }}
+                                placeholder="ID" maxLength={64} className="ds-input ds-input--sm w-full font-mono" />
+                        </label>
                     </div>
+                    <label className="min-w-0">
+                        <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage Name</span>
+                        <input autoFocus value={name} onChange={(e) => { setName(e.target.value); if (!idEdited) setId(e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 64)); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setAdding(false); setId(''); setIdEdited(false); setName(''); } }}
+                            placeholder="Stage name" className="ds-input ds-input--sm w-full" />
+                    </label>
                     <div className="flex gap-1.5">
                         <button onClick={submit} disabled={busy || !name.trim()} className="flex-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md py-1 disabled:opacity-40">Add</button>
-                        <button onClick={() => { setAdding(false); setName(''); }} disabled={busy} className="flex-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md py-1">Cancel</button>
+                        <button onClick={() => { setAdding(false); setId(''); setIdEdited(false); setName(''); }} disabled={busy} className="flex-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md py-1">Cancel</button>
                     </div>
                 </div>
             ) : (
@@ -476,14 +484,16 @@ const LeadsKanban = ({
         [appliedFilters, responsibleFilter, sortField, sortOrder, collectionId, refreshKey]
     );
     // Add/delete of a stage changes the id-set (rename/recolor/reorder do not).
-    const stageIdSig = useMemo(() => stages.map(s => s.id).slice().sort((a, b) => a - b).join(','), [stages]);
+    const stageIdSig = useMemo(() => stages.map(s => String(s.id)).sort().join(','), [stages]);
 
     const buildParams = useCallback((stageId, cursor, page) => {
         const active = {};
         for (const [k, v] of Object.entries(appliedFilters || {})) {
             if (k !== 'collectionId' && isFilterActive(v)) active[k] = v;
         }
-        active.stage = { type: 'number', op: 'eq', value: Number(stageId) };
+        active.stage = typeof stageId === 'number'
+            ? { type: 'number', op: 'eq', value: stageId }
+            : { type: 'text', value: stageId };
         return {
             limit: PAGE,
             acctId,
@@ -596,7 +606,7 @@ const LeadsKanban = ({
     // ── Move a lead to another stage (drag or the card's move icon) ───────────
     const moveLeadToStage = useCallback(async (lead, toStageId) => {
         const fromStageId = lead.stage;
-        if (Number(fromStageId) === Number(toStageId)) return;
+        if (String(fromStageId) === String(toStageId)) return;
         // Optimistic: remove from source, prepend to target.
         setColumns(prev => {
             const from = prev[fromStageId] || EMPTY_COL;
@@ -608,7 +618,7 @@ const LeadsKanban = ({
             };
         });
         try {
-            await api.put(`/api/ui/leads/${lead._id}`, { stage: Number(toStageId) }, { params: { acctId } });
+            await api.put(`/api/ui/leads/${lead._id}`, { stage: toStageId }, { params: { acctId } });
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to move lead.');
             // Revert by refetching both affected columns.
@@ -659,7 +669,7 @@ const LeadsKanban = ({
         if (!v || v === stage.name) return;
         setStageBusy(true);
         try {
-            const res = await api.put(`${stagesBase}/${stage.id}`, { name: v }, { params: { acctId } });
+            const res = await api.put(`${stagesBase}/${encodeURIComponent(stage.id)}`, { name: v }, { params: { acctId } });
             setStages(res.data?.data || []);
         } catch (err) { showError(err.response?.data?.message || 'Failed to rename stage.'); }
         finally { setStageBusy(false); }
@@ -668,7 +678,7 @@ const LeadsKanban = ({
         if (!color || color === stage.color) return;
         setStageBusy(true);
         try {
-            const res = await api.put(`${stagesBase}/${stage.id}`, { color }, { params: { acctId } });
+            const res = await api.put(`${stagesBase}/${encodeURIComponent(stage.id)}`, { color }, { params: { acctId } });
             setStages(res.data?.data || []);
         } catch (err) { showError(err.response?.data?.message || 'Failed to update colour.'); }
         finally { setStageBusy(false); }
@@ -687,10 +697,10 @@ const LeadsKanban = ({
         } catch (err) { showError(err.response?.data?.message || 'Failed to reorder stages.'); }
         finally { setStageBusy(false); }
     };
-    const addStage = async (name, color) => {
+    const addStage = async (name, color, id) => {
         setStageBusy(true);
         try {
-            const res = await api.post(stagesBase, { name, color }, { params: { acctId } });
+            const res = await api.post(stagesBase, { id: id || undefined, name, color }, { params: { acctId } });
             setStages(res.data?.data || []);
             showSuccess('Stage added.');
         } catch (err) { showError(err.response?.data?.message || 'Failed to add stage.'); }
@@ -700,7 +710,7 @@ const LeadsKanban = ({
         if (!confirmDelete) return;
         setStageBusy(true);
         try {
-            const res = await api.delete(`${stagesBase}/${confirmDelete.id}`, { params: { acctId } });
+            const res = await api.delete(`${stagesBase}/${encodeURIComponent(confirmDelete.id)}`, { params: { acctId } });
             const data = res.data?.data || {};
             setStages(data.stages || []);
             const moved = data.reassignedCount || 0;
@@ -755,7 +765,7 @@ const LeadsKanban = ({
                     viewport (and the cursor) regardless of any transformed ancestor. */}
                 {createPortal(
                     <DragOverlay dropAnimation={{ duration: 200, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
-                        {dragLead ? <CardGhost lead={dragLead} stageColor={(stages.find(s => Number(s.id) === Number(dragLead.stage)) || {}).color || '#4f46e5'} /> : null}
+                        {dragLead ? <CardGhost lead={dragLead} stageColor={(stages.find(s => String(s.id) === String(dragLead.stage)) || {}).color || '#4f46e5'} /> : null}
                     </DragOverlay>,
                     document.body
                 )}

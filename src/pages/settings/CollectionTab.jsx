@@ -100,7 +100,7 @@ const API_PREDEFINED_FIELDS = [
     { label: 'Phone',       field: 'phone',       type: 'text',   required: true,  sample: '+1234567890' },
     { label: 'Email',       field: 'email',       type: 'text',   required: false, sample: 'joe@example.com' },
     { label: 'Responsible', field: 'responsible', type: 'text', required: false, sample: '{{user_id}}' },
-    { label: 'Stage',       field: 'stage',       type: 'number', required: false, sample: 1 },
+    { label: 'Stage',       field: 'stage',       type: 'text', required: false, sample: 'NEW' },
 ];
 const API_PREDEFINED_KEYS = new Set(API_PREDEFINED_FIELDS.map(f => f.field));
 
@@ -201,6 +201,7 @@ const ApiInfoModal = ({ collection, acctNo, acctId, onClose }) => {
     // Build the example payload in the same order — predefined fields always shown.
     const payloadFields = {};
     API_PREDEFINED_FIELDS.forEach(f => { payloadFields[f.field] = f.sample; });
+    payloadFields.stage = collection.stages?.[0]?.id ?? 'NEW';
     customFields.forEach(f => { payloadFields[f.field] = dummyValue(f); });
 
     const payloadText = JSON.stringify({ data: payloadFields }, null, 2);
@@ -458,10 +459,50 @@ const CollectionNameDialog = ({ initial = '', onSave, onClose, saving }) => {
 // Save flow). At least one stage is mandatory; deleting a stage reassigns its
 // leads to the first remaining stage.
 const DEFAULT_STAGE_COLOR = '#4f46e5';
+const stageIdFromName = (name) => name.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 64);
+
+const StageIdentityEditor = ({ stage, busy, onSave }) => {
+    const [id, setId] = useState(String(stage.id));
+    const [name, setName] = useState(stage.name);
+    const dirty = id !== String(stage.id) || name !== stage.name;
+
+    useEffect(() => {
+        setId(String(stage.id));
+        setName(stage.name);
+    }, [stage.id, stage.name]);
+
+    const save = () => {
+        if (!id.trim() || !name.trim() || !dirty) return;
+        onSave(stage, { id: id.trim(), name: name.trim() });
+    };
+
+    return (
+        <div className="grid min-w-0 flex-1 grid-cols-[6rem_minmax(10rem,1fr)_auto] items-end gap-2">
+            <label className="min-w-0">
+                <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage ID</span>
+                <input type="text" value={id} disabled={busy} maxLength={64}
+                    aria-label={`${stage.name} stage ID`}
+                    onChange={(e) => setId(e.target.value.replace(/[^A-Za-z0-9]/g, ''))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+                    className="ds-input ds-input--sm w-full font-mono" title="Unique letters and numbers only" />
+            </label>
+            <label className="min-w-0">
+                <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage Name</span>
+                <input type="text" value={name} disabled={busy} placeholder="Stage name"
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+                    className="ds-input ds-input--sm w-full" aria-label={`Name for stage ${stage.id}`} />
+            </label>
+            <Button size="sm" onClick={save} disabled={busy || !dirty || !id.trim() || !name.trim()}>Save</Button>
+        </div>
+    );
+};
 
 const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSuccess, showError }) => {
     const [busy, setBusy]               = useState(false);
     const [adding, setAdding]           = useState(false);
+    const [newId, setNewId]             = useState('');
+    const [newIdEdited, setNewIdEdited] = useState(false);
     const [newName, setNewName]         = useState('');
     const [newColor, setNewColor]       = useState(DEFAULT_STAGE_COLOR);
     const [confirmDelete, setConfirmDelete] = useState(null); // the stage pending deletion
@@ -473,9 +514,9 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
         if (!name) return;
         setBusy(true);
         try {
-            const res = await api.post(base, { name, color: newColor }, { params: { acctId } });
+            const res = await api.post(base, { id: newId.trim() || undefined, name, color: newColor }, { params: { acctId } });
             onStagesChange(res.data?.data || []);
-            setNewName(''); setNewColor(DEFAULT_STAGE_COLOR); setAdding(false);
+            setNewId(''); setNewIdEdited(false); setNewName(''); setNewColor(DEFAULT_STAGE_COLOR); setAdding(false);
             showSuccess('Stage added.');
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to add stage.');
@@ -484,12 +525,12 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
 
     // Persist a name/colour edit. Skips the call when nothing changed.
     const saveStage = async (stage, patch) => {
-        if (patch.name !== undefined && patch.name.trim() === stage.name) return;
-        if (patch.color !== undefined && patch.color === stage.color) return;
         if (patch.name !== undefined && !patch.name.trim()) return;
+        const unchanged = Object.entries(patch).every(([key, value]) => String(value).trim() === String(stage[key] ?? '').trim());
+        if (unchanged) return;
         setBusy(true);
         try {
-            const res = await api.put(`${base}/${stage.id}`, patch, { params: { acctId } });
+            const res = await api.put(`${base}/${encodeURIComponent(stage.id)}`, patch, { params: { acctId } });
             onStagesChange(res.data?.data || []);
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to update stage.');
@@ -517,7 +558,7 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
         if (!confirmDelete) return;
         setBusy(true);
         try {
-            const res = await api.delete(`${base}/${confirmDelete.id}`, { params: { acctId } });
+            const res = await api.delete(`${base}/${encodeURIComponent(confirmDelete.id)}`, { params: { acctId } });
             const data = res.data?.data || {};
             onStagesChange(data.stages || []);
             const moved = data.reassignedCount || 0;
@@ -540,7 +581,7 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
 
             <ul className="flex flex-col gap-2">
                 {stages.map((stage, index) => (
-                    <li key={stage.id} className="flex items-center gap-2">
+                    <li key={stage.id} className="flex items-end gap-2">
                         {/* Reorder */}
                         <div className="flex flex-col">
                             <button
@@ -561,21 +602,10 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
                             </button>
                         </div>
 
-                        {/* Order id badge */}
-                        <span className="text-[10px] font-mono text-gray-400 w-4 text-center">{stage.id}</span>
-
                         <StageColorPicker value={stage.color} disabled={busy}
                             label={`Choose ${stage.name} color`} onChange={(color) => saveStage(stage, { color })} />
 
-                        {/* Name */}
-                        <input
-                            type="text"
-                            defaultValue={stage.name}
-                            disabled={busy}
-                            onBlur={(e) => saveStage(stage, { name: e.target.value })}
-                            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                            className="ds-input ds-input--sm flex-1"
-                        />
+                        <StageIdentityEditor stage={stage} busy={busy} onSave={saveStage} />
 
                         {/* Delete */}
                         <Tooltip content={stages.length <= 1 ? 'At least one stage is required' : 'Delete stage'} placement="top">
@@ -596,19 +626,23 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
 
             {/* Add stage */}
             {adding ? (
-                <div className="flex items-center gap-2 mt-3">
-                    <StageColorPicker value={newColor} onChange={setNewColor} label="Choose new stage color" />
-                    <input
-                        autoFocus
-                        type="text"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') addStage(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
-                        placeholder="Stage name (e.g. In Progress)"
-                        className="ds-input ds-input--sm flex-1"
-                    />
+                <div className="mt-3 grid grid-cols-[auto_5rem_minmax(12rem,1fr)_auto_auto] items-end gap-2">
+                    <div className="pb-0.5"><StageColorPicker value={newColor} onChange={setNewColor} label="Choose new stage color" /></div>
+                    <label className="min-w-0">
+                        <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage ID</span>
+                        <input type="text" value={newId} maxLength={64} placeholder="ID"
+                            onChange={(e) => { setNewIdEdited(true); setNewId(e.target.value.replace(/[^A-Za-z0-9]/g, '')); }}
+                            className="ds-input ds-input--sm w-full font-mono" title="Unique letters and numbers only" />
+                    </label>
+                    <label className="min-w-0">
+                        <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage Name</span>
+                        <input autoFocus type="text" value={newName}
+                            onChange={(e) => { setNewName(e.target.value); if (!newIdEdited) setNewId(stageIdFromName(e.target.value)); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') addStage(); if (e.key === 'Escape') { setAdding(false); setNewId(''); setNewIdEdited(false); setNewName(''); } }}
+                            placeholder="Stage name (e.g. In Progress)" className="ds-input ds-input--sm w-full" />
+                    </label>
                     <Button size="sm" onClick={addStage} disabled={busy || !newName.trim()} loading={busy}>Add</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setNewName(''); }} disabled={busy}>Cancel</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setNewId(''); setNewIdEdited(false); setNewName(''); }} disabled={busy}>Cancel</Button>
                 </div>
             ) : (
                 <button

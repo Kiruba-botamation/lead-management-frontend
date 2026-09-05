@@ -1377,9 +1377,12 @@ const LeadsGrid = () => {
                 if (key === 'collectionId') continue;
                 if (isFilterActive(def)) activeFilters[key] = def;
             }
-            // Stage filter (from the toolbar menu) is applied as a typed number-eq filter.
+            // Preserve the stage's stored type for legacy numeric and custom IDs.
             if (stageFilter) {
-                activeFilters.stage = { type: 'number', op: 'eq', value: Number(stageFilter) };
+                const selectedStage = stages.find(stage => String(stage.id) === String(stageFilter));
+                activeFilters.stage = typeof selectedStage?.id === 'number'
+                    ? { type: 'number', op: 'eq', value: selectedStage.id }
+                    : { type: 'text', value: selectedStage?.id ?? stageFilter };
             }
 
             const params = {
@@ -1428,7 +1431,7 @@ const LeadsGrid = () => {
         } finally {
             if (generation === leadsGenerationRef.current) setLoading(false);
         }
-    }, [viewMode, currentPage, currentCursor, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [viewMode, currentPage, currentCursor, pageSize, sortField, sortOrder, appliedFilters, acctId, isAccountLinked, collectionsReady, columnDefsReady, selectedCollection, responsibleFilter, stageFilter, stages, isSuperAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
