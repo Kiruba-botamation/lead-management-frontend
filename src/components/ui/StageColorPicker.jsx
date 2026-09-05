@@ -129,7 +129,7 @@ const StageColorPicker = ({ value, onChange, disabled = false, label = 'Choose s
                 style={{ backgroundColor: value }} title={`${label} (${value.toUpperCase()})`}
                 aria-label={`${label} (${value.toUpperCase()})`} aria-expanded={open} />
             {open && createPortal(
-                <div ref={panelRef} style={panelStyle || { position: 'fixed', visibility: 'hidden' }}
+                <div ref={panelRef} data-stage-color-picker-panel style={panelStyle || { position: 'fixed', visibility: 'hidden' }}
                     className="z-[var(--z-dropdown)] rounded-lg border border-gray-200 bg-white p-3 shadow-xl">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">HEX</label>
                     <div className="flex items-center gap-2 mb-3">

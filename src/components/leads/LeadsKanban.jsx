@@ -302,7 +302,10 @@ const KanbanColumn = ({
     // Close the header menu on outside click.
     useEffect(() => {
         if (!menuOpen) return;
-        const h = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+        const h = (e) => {
+            if (e.target.closest?.('[data-stage-color-picker-panel]')) return;
+            if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+        };
         document.addEventListener('mousedown', h);
         return () => document.removeEventListener('mousedown', h);
     }, [menuOpen]);
@@ -410,7 +413,7 @@ const KanbanColumn = ({
 };
 
 // ── Add-stage column ────────────────────────────────────────────────────────
-const AddStageColumn = ({ busy, onAdd }) => {
+const AddStageColumn = ({ busy, stages, onAdd }) => {
     const [adding, setAdding] = useState(false);
     const [id, setId]         = useState('');
     const [idEdited, setIdEdited] = useState(false);
@@ -444,7 +447,12 @@ const AddStageColumn = ({ busy, onAdd }) => {
                 </div>
             ) : (
                 <button
-                    onClick={() => setAdding(true)}
+                    onClick={() => {
+                        const numericIds = stages.map(stage => Number(stage.id)).filter(value => Number.isSafeInteger(value) && value > 0);
+                        setId(String(Math.max(0, ...numericIds) + 1));
+                        setIdEdited(false);
+                        setAdding(true);
+                    }}
                     className="rounded-xl border border-dashed border-gray-300 bg-white/40 hover:bg-white hover:border-indigo-300 text-gray-400 hover:text-indigo-600 transition-colors py-3 flex items-center justify-center gap-1.5 text-xs font-semibold"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
@@ -757,7 +765,7 @@ const LeadsKanban = ({
                                 onDeleteStage={(s) => setConfirmDelete(s)}
                             />
                         ))}
-                        <AddStageColumn busy={stageBusy} onAdd={addStage} />
+                        <AddStageColumn busy={stageBusy} stages={stages} onAdd={addStage} />
                     </div>
                 </div>
 

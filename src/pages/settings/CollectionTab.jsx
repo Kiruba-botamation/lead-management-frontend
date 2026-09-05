@@ -459,8 +459,12 @@ const CollectionNameDialog = ({ initial = '', onSave, onClose, saving }) => {
 // Save flow). At least one stage is mandatory; deleting a stage reassigns its
 // leads to the first remaining stage.
 const DEFAULT_STAGE_COLOR = '#4f46e5';
-const stageIdFromName = (name) => name.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 64);
-
+const nextNumericStageId = (stages, nextStageId) => {
+    const configured = Number(nextStageId);
+    if (Number.isSafeInteger(configured) && configured > 0) return configured;
+    const numericIds = stages.map(stage => Number(stage.id)).filter(id => Number.isSafeInteger(id) && id > 0);
+    return Math.max(0, ...numericIds) + 1;
+};
 const StageIdentityEditor = ({ stage, busy, onSave }) => {
     const [id, setId] = useState(String(stage.id));
     const [name, setName] = useState(stage.name);
@@ -498,7 +502,7 @@ const StageIdentityEditor = ({ stage, busy, onSave }) => {
     );
 };
 
-const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSuccess, showError }) => {
+const StagesEditor = ({ acctId, collectionId, stages, nextStageId, onStagesChange, showSuccess, showError }) => {
     const [busy, setBusy]               = useState(false);
     const [adding, setAdding]           = useState(false);
     const [newId, setNewId]             = useState('');
@@ -514,8 +518,13 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
         if (!name) return;
         setBusy(true);
         try {
-            const res = await api.post(base, { id: newId.trim() || undefined, name, color: newColor }, { params: { acctId } });
-            onStagesChange(res.data?.data || []);
+            const res = await api.post(base, { id: newIdEdited ? newId.trim() : undefined, name, color: newColor }, { params: { acctId } });
+            const numericId = Number(newId);
+            const currentNextStageId = nextNumericStageId(stages, nextStageId);
+            const updatedNextStageId = !newIdEdited
+                ? currentNextStageId + 1
+                : Number.isSafeInteger(numericId) && numericId >= currentNextStageId ? numericId + 1 : currentNextStageId;
+            onStagesChange(res.data?.data || [], { nextStageId: updatedNextStageId });
             setNewId(''); setNewIdEdited(false); setNewName(''); setNewColor(DEFAULT_STAGE_COLOR); setAdding(false);
             showSuccess('Stage added.');
         } catch (err) {
@@ -637,7 +646,7 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
                     <label className="min-w-0">
                         <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-gray-400">Stage Name</span>
                         <input autoFocus type="text" value={newName}
-                            onChange={(e) => { setNewName(e.target.value); if (!newIdEdited) setNewId(stageIdFromName(e.target.value)); }}
+                            onChange={(e) => setNewName(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') addStage(); if (e.key === 'Escape') { setAdding(false); setNewId(''); setNewIdEdited(false); setNewName(''); } }}
                             placeholder="Stage name (e.g. In Progress)" className="ds-input ds-input--sm w-full" />
                     </label>
@@ -647,7 +656,7 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
             ) : (
                 <button
                     type="button"
-                    onClick={() => setAdding(true)}
+                    onClick={() => { setNewId(String(nextNumericStageId(stages, nextStageId))); setNewIdEdited(false); setAdding(true); }}
                     className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors mt-3"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
@@ -822,8 +831,8 @@ const CollectionTab = () => {
 
     // Keep the selected collection's stages in sync after a stage CRUD operation,
     // and mirror them into the lightweight list so the grid/other tabs stay current.
-    const handleStagesChange = (stages) => {
-        setSelectedCollection(prev => prev ? { ...prev, stages } : prev);
+    const handleStagesChange = (stages, updates = {}) => {
+        setSelectedCollection(prev => prev ? { ...prev, stages, ...updates } : prev);
         setCollections(prev => prev.map(c => c._id === selectedId ? { ...c, stages } : c));
     };
 
@@ -1100,6 +1109,7 @@ const CollectionTab = () => {
                             acctId={acctId}
                             collectionId={selectedId}
                             stages={selectedCollection.stages || []}
+                            nextStageId={selectedCollection.nextStageId}
                             onStagesChange={handleStagesChange}
                             showSuccess={showSuccess}
                             showError={showError}

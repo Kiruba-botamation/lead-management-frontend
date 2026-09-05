@@ -2249,7 +2249,13 @@ const LeadsGrid = () => {
                                                             <tr>
                                                                 {hasResponsibleCol && (
                                                                     <th className="px-3 py-2.5 text-left align-middle sticky left-0 z-30 bg-white/90 backdrop-blur-xl" style={{ width: RESP_PIN_W, minWidth: RESP_PIN_W, boxShadow: '4px 0 8px -2px rgba(0,0,0,0.08)' }}>
-                                                                        <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Responsible</span>
+                                                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                                                                            <svg className="h-3.5 w-3.5 text-slate-400" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                                                                <circle cx="8" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4" />
+                                                                                <path d="M3.5 13c.35-2.35 2.05-3.75 4.5-3.75s4.15 1.4 4.5 3.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                                                            </svg>
+                                                                            Responsible
+                                                                        </span>
                                                                     </th>
                                                                 )}
                                                                 {hasStageCol && (
