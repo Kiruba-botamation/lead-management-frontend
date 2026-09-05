@@ -13,6 +13,7 @@ import { useNotifications } from '../../components/Notifications';
 import Button from '../../components/ui/Button';
 import Tooltip from '../../components/Tooltip';
 import { Dropdown, DropdownItem } from '../../components/ui/Dropdown';
+import StageColorPicker from '../../components/ui/StageColorPicker';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -563,32 +564,8 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
                         {/* Order id badge */}
                         <span className="text-[10px] font-mono text-gray-400 w-4 text-center">{stage.id}</span>
 
-                        {/* Colour preview; editing is hex-only to avoid browser RGB/HSL pickers. */}
-                        <span
-                            className="w-7 h-7 rounded-md border border-gray-200 shrink-0"
-                            style={{ backgroundColor: stage.color }}
-                            aria-hidden="true"
-                        />
-
-                        <input
-                            key={stage.color}
-                            type="text"
-                            defaultValue={stage.color.toUpperCase()}
-                            disabled={busy}
-                            maxLength={7}
-                            spellCheck={false}
-                            aria-label={`${stage.name} hex color`}
-                            onBlur={(e) => {
-                                const value = e.target.value.trim();
-                                if (/^#[0-9a-fA-F]{6}$/.test(value)) {
-                                    saveStage(stage, { color: value });
-                                } else {
-                                    e.target.value = stage.color.toUpperCase();
-                                }
-                            }}
-                            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                            className="ds-input ds-input--sm w-[5.25rem] font-mono uppercase"
-                        />
+                        <StageColorPicker value={stage.color} disabled={busy}
+                            label={`Choose ${stage.name} color`} onChange={(color) => saveStage(stage, { color })} />
 
                         {/* Name */}
                         <input
@@ -620,26 +597,7 @@ const StagesEditor = ({ acctId, collectionId, stages, onStagesChange, showSucces
             {/* Add stage */}
             {adding ? (
                 <div className="flex items-center gap-2 mt-3">
-                    <span
-                        className="w-7 h-7 rounded-md border border-gray-200 shrink-0"
-                        style={{ backgroundColor: /^#[0-9a-fA-F]{6}$/.test(newColor) ? newColor : 'transparent' }}
-                        aria-hidden="true"
-                    />
-                    <input
-                        type="text"
-                        value={newColor.toUpperCase()}
-                        maxLength={7}
-                        spellCheck={false}
-                        aria-label="New stage hex color"
-                        onChange={(e) => {
-                            const value = e.target.value;
-                            if (/^#[0-9a-fA-F]{0,6}$/.test(value)) setNewColor(value);
-                        }}
-                        onBlur={() => {
-                            if (!/^#[0-9a-fA-F]{6}$/.test(newColor)) setNewColor(DEFAULT_STAGE_COLOR);
-                        }}
-                        className="ds-input ds-input--sm w-[5.25rem] font-mono uppercase"
-                    />
+                    <StageColorPicker value={newColor} onChange={setNewColor} label="Choose new stage color" />
                     <input
                         autoFocus
                         type="text"

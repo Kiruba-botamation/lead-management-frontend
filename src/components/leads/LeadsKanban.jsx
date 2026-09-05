@@ -26,6 +26,7 @@ import {
 import api from '../../api/axiosConfig';
 import { activityApi } from '../../api/notesApi';
 import Tooltip from '../Tooltip';
+import StageColorPicker from '../ui/StageColorPicker';
 import { tint, twoLetterColor, adminDisplayName } from './leadShared';
 
 const PAGE = 15;
@@ -346,12 +347,11 @@ const KanbanColumn = ({
                         {menuOpen && (
                             <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-50">
                                 <button onClick={() => { setRenaming(true); setNameDraft(stage.name); setMenuOpen(false); }} className="w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50">Rename</button>
-                                <label className="w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 flex items-center justify-between cursor-pointer">
+                                <div className="w-full px-3 py-1.5 text-left text-xs text-gray-700 flex items-center justify-between">
                                     <span>Colour</span>
-                                    <span className="w-4 h-4 rounded border border-gray-200 relative overflow-hidden" style={{ backgroundColor: stage.color }}>
-                                        <input type="color" defaultValue={stage.color} disabled={busy} onChange={(e) => { onRecolor(stage, e.target.value); }} onBlur={() => setMenuOpen(false)} className="absolute inset-0 opacity-0 cursor-pointer" />
-                                    </span>
-                                </label>
+                                    <StageColorPicker value={stage.color} disabled={busy} align="right"
+                                        label={`Choose ${stage.name} color`} onChange={(color) => onRecolor(stage, color)} />
+                                </div>
                                 <button
                                     disabled={busy || stageCount <= 1}
                                     onClick={() => { onDeleteStage(stage); setMenuOpen(false); }}
@@ -422,9 +422,7 @@ const AddStageColumn = ({ busy, onAdd }) => {
             {adding ? (
                 <div className="rounded-xl border border-dashed border-gray-300 bg-white p-2.5 flex flex-col gap-2">
                     <div className="flex items-center gap-2">
-                        <label className="w-7 h-7 rounded-md border border-gray-200 relative overflow-hidden cursor-pointer shrink-0" style={{ backgroundColor: color }}>
-                            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
-                        </label>
+                        <StageColorPicker value={color} onChange={setColor} label="Choose new stage color" />
                         <input
                             autoFocus value={name} onChange={(e) => setName(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setAdding(false); setName(''); } }}
