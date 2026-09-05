@@ -1,5 +1,6 @@
 import React, { memo, useState, useEffect, useCallback, useRef } from 'react';
 import api, { authApi } from '../../api/axiosConfig';
+import { useNotifications } from '../../components/Notifications';
 import Tooltip from '../../components/Tooltip';
 import Button from '../../components/ui/Button';
 import { Dropdown, DropdownItem } from '../../components/ui/Dropdown';
@@ -225,7 +226,7 @@ const AdminRow = memo(function AdminRow({ admin, copied, onCopy, onEdit }) {
     );
 });
 
-const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError, onSaved }) => {
+const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onSaved, showError, showSuccess }) => {
     const [draft, setDraft] = useState(() => ({
         firstName: admin.firstName || '',
         lastName: admin.lastName || '',
@@ -252,7 +253,6 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
     const syncFromAuth = async () => {
         if (!admin.userId) return;
         setAuthSyncing(true);
-        onError('');
         try {
             const res = await authApi.get(`/api/user/users/${admin.userId}`);
             const user = res.data.user;
@@ -264,8 +264,9 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
                 phone: user.phone ?? current.phone,
                 profileImage: user.profileImageUrl ?? current.profileImage,
             }));
+            showSuccess('Admin details loaded from the auth app.');
         } catch (err) {
-            onError(err.response?.data?.message || 'Failed to fetch user details from the auth app.');
+            showError(err.response?.data?.message || 'Failed to fetch user details from the auth app.');
         } finally {
             setAuthSyncing(false);
         }
@@ -273,25 +274,22 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
 
     const saveAdmin = async () => {
         setSaving(true);
-        onError('');
         try {
             await api.patch('/api/ui/admins/profile', {
-                acctId,
                 chatbotAdminId: admin.chatbotAdminId,
                 firstName: draft.firstName,
                 lastName: draft.lastName,
                 email: draft.email,
                 phone: draft.phone,
                 profileImage: draft.profileImage,
-            });
+            }, { params: { acctId } });
 
             const levelChanged = draft.accessLevel !== admin.accessLevel;
             if (isSuperadmin && levelChanged) {
                 await api.patch('/api/ui/admins/access-level', {
-                    acctId,
                     chatbotAdminId: admin.chatbotAdminId,
                     accessLevel: draft.accessLevel,
-                });
+                }, { params: { acctId } });
             }
 
             onSaved(admin._id, {
@@ -302,9 +300,9 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
                 profileImage: draft.profileImage,
                 ...(isSuperadmin && levelChanged ? { accessLevel: draft.accessLevel } : {}),
             });
-            onClose();
+            showSuccess('Admin details updated successfully.');
         } catch (err) {
-            onError(err.response?.data?.message || 'Failed to update admin.');
+            showError(err.response?.data?.message || 'Failed to update admin.');
         } finally {
             setSaving(false);
         }
@@ -318,14 +316,23 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
                         <h3 className="ds-h6 text-gray-800">Edit Admin</h3>
                         <p className="ds-caption text-gray-500">{fullName(admin)}</p>
                     </div>
-                    <Tooltip content={admin.userId ? 'Pull name, email, phone & picture from the auth app' : 'No linked user to sync'} placement="left">
-                        <Button type="button" variant="secondary" size="sm" onClick={syncFromAuth} disabled={saving || !admin.userId} loading={authSyncing}>
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                            {authSyncing ? 'Syncing...' : 'Sync from auth'}
-                        </Button>
-                    </Tooltip>
+                    <div className="flex items-center gap-2">
+                        <Tooltip content={admin.userId ? 'Pull name, email, phone & picture from the auth app' : 'No linked user to sync'} placement="left">
+                            <Button type="button" variant="secondary" size="sm" onClick={syncFromAuth} disabled={saving || !admin.userId} loading={authSyncing}>
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                {authSyncing ? 'Syncing...' : 'Sync from auth'}
+                            </Button>
+                        </Tooltip>
+                        <Tooltip content="Close" placement="top">
+                            <Button type="button" variant="ghost" size="sm" iconOnly onClick={onClose} disabled={saving || authSyncing} aria-label="Close edit admin dialog">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </Button>
+                        </Tooltip>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-3 mb-4">
@@ -386,12 +393,12 @@ const EditAdminDialog = ({ acctId, admin, isSuperadmin, roles, onClose, onError,
 };
 
 const AdminTab = ({ acctId }) => {
+    const { showError, showSuccess } = useNotifications();
     const [admins, setAdmins] = useState([]);
     const [filters, setFilters] = useState({});
     const [appliedFilters, setAppliedFilters] = useState({});
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
-    const [error, setError] = useState('');
     const [sortField, setSortField] = useState('');
     const [sortOrder, setSortOrder] = useState('asc');
     const filterTimerRef = useRef(null);
@@ -415,10 +422,11 @@ const AdminTab = ({ acctId }) => {
             setCopiedIdentifier(String(value));
             if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
             copyTimerRef.current = setTimeout(() => setCopiedIdentifier(current => current === String(value) ? '' : current), 2000);
+            showSuccess('Admin identifier copied.');
         } catch {
-            setError('Failed to copy the admin identifier.');
+            showError('Failed to copy the admin identifier.');
         }
-    }, []);
+    }, [showError, showSuccess]);
 
     const loadAdmins = useCallback(async (endpoint, filterParams = {}, sortBy = '', order = 'asc', page = 1, limit = 20) => {
         requestRef.current.controller?.abort();
@@ -435,7 +443,6 @@ const AdminTab = ({ acctId }) => {
         setLoading(false);
         setSyncing(false);
         setBusy(true);
-        setError('');
         try {
             const params = { acctId, page, limit, ...filterParams };
             if (sortBy) { params.sortBy = sortBy; params.sortOrder = order; }
@@ -447,14 +454,15 @@ const AdminTab = ({ acctId }) => {
             setTotalRecords(pagination?.total ?? list.length);
             setTotalPages(pagination?.pages ?? 1);
             setCurrentPage(pagination?.page ?? page);
+            if (endpoint === '/api/ui/admins') showSuccess('Admins synced successfully.');
         } catch (err) {
             if (controller.signal.aborted || err.code === 'ERR_CANCELED') return;
             if (requestRef.current.generation !== generation) return;
-            setError(err.response?.data?.message || err.message || 'Failed to load admins.');
+            showError(err.response?.data?.message || err.message || 'Failed to load admins.');
         } finally {
             if (requestRef.current.generation === generation) setBusy(false);
         }
-    }, [acctId]);
+    }, [acctId, showError, showSuccess]);
 
     const buildActiveFilters = useCallback(() => (
         Object.keys(appliedFilters).reduce((acc, k) => {
@@ -483,9 +491,14 @@ const AdminTab = ({ acctId }) => {
         const controller = new AbortController();
         api.get('/api/ui/roles', { params: { acctId }, signal: controller.signal })
             .then((res) => setRoles(res.data?.roles || []))
-            .catch((err) => { if (err.code !== 'ERR_CANCELED') setRoles([]); });
+            .catch((err) => {
+                if (err.code !== 'ERR_CANCELED') {
+                    setRoles([]);
+                    showError(err.response?.data?.message || 'Failed to load admin roles.');
+                }
+            });
         return () => controller.abort();
-    }, [acctId]);
+    }, [acctId, showError]);
 
     const syncAdmins = useCallback(() => {
         loadAdmins('/api/ui/admins', buildActiveFilters(), sortField, sortOrder, currentPage, pageSize);
@@ -523,6 +536,7 @@ const AdminTab = ({ acctId }) => {
     const closeEdit = useCallback(() => setEditingAdmin(null), []);
     const handleAdminSaved = useCallback((adminId, patch) => {
         setAdmins(current => current.map(admin => (admin._id === adminId ? { ...admin, ...patch } : admin)));
+        setEditingAdmin(current => current?._id === adminId ? { ...current, ...patch } : current);
     }, []);
 
     const renderSortIcon = (col) => {
@@ -569,16 +583,6 @@ const AdminTab = ({ acctId }) => {
             </div>
 
             <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white rounded-lg shadow-2xl border border-gray-200">
-                {error && (
-                    <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-900 px-3 py-2 m-3 rounded-lg">
-                        <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span className="text-xs font-medium">Error: {error}</span>
-                        </div>
-                    </div>
-                )}
                 <div className="flex-1 overflow-y-scroll overflow-x-auto min-h-0">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="sticky top-0 z-10 bg-white/70 backdrop-blur-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] transition-all group/header">
@@ -731,8 +735,9 @@ const AdminTab = ({ acctId }) => {
                     isSuperadmin={isSuperadmin}
                     roles={roles}
                     onClose={closeEdit}
-                    onError={setError}
                     onSaved={handleAdminSaved}
+                    showError={showError}
+                    showSuccess={showSuccess}
                 />
             )}
         </div>

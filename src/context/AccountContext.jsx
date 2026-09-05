@@ -163,7 +163,10 @@ export const AccountProvider = ({ children }) => {
             const email = userDetails?.email || user?.email || '';
             const phone = userDetails?.phone || '';
             if (data && (email || phone)) {
-                api.post('/api/ui/admins/contact', { email, phone }, { params: { acctId }, signal: controller.signal }).catch(() => { /* non-fatal */ });
+                const contact = {};
+                if (typeof email === 'string' && email.trim()) contact.email = email.trim();
+                if (typeof phone === 'string' && phone.trim()) contact.phone = phone.trim();
+                api.post('/api/ui/admins/contact', contact, { params: { acctId }, signal: controller.signal }).catch(() => { /* non-fatal */ });
             }
         })();
 
