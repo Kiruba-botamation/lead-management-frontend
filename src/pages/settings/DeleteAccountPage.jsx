@@ -76,7 +76,9 @@ const DeleteAccountPage = ({ acctId: acctIdProp, accountFromUrl }) => {
         setIsLoading(true);
 
         try {
-            const response = await api.delete(`/api/ui/accounts/${resolvedAcctId}/user/${userId}`);
+            const response = await api.delete(`/api/ui/accounts/${resolvedAcctId}/user/${userId}`, {
+                params: { acctId: resolvedAcctId }
+            });
 
             if (!response.data?.success) {
                 throw new Error(response.data?.message || 'Failed to delete account.');

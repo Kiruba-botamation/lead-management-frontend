@@ -10,7 +10,7 @@ import {
  * Falls back to a text-initial avatar if the URL is empty or the image fails to load.
  */
 const defaultClassName = [
-    'w-10 h-10 object-contain rounded-lg shadow-lg',
+    'w-8 h-8 p-0.5 object-contain rounded-lg shadow-lg',
     BRAND_LOGO_TRANSPARENT_BACKGROUND ? 'bg-transparent' : 'bg-white',
 ].join(' ');
 
@@ -36,7 +36,7 @@ const BrandLogo = ({ className = defaultClassName }) => {
     // Fallback: brand name initial in a styled box
     return (
         <div
-            className="w-10 h-10 rounded-lg shadow-lg flex items-center justify-center bg-gray-700 text-white font-bold text-lg select-none flex-shrink-0"
+            className="w-8 h-8 rounded-lg shadow-lg flex items-center justify-center bg-gray-700 text-white font-bold text-base select-none flex-shrink-0"
             title={BRAND_NAME}
         >
             {BRAND_NAME.charAt(0).toUpperCase()}
