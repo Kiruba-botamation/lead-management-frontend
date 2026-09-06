@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from './ui/Button';
 
-const DeleteConfirmation = ({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Delete' }) => {
+const DeleteConfirmation = ({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Delete', loading = false }) => {
   if (!isOpen) return null;
 
   return (
@@ -9,7 +9,7 @@ const DeleteConfirmation = ({ isOpen, onClose, onConfirm, title, message, confir
       {/* Overlay */}
       <div
         className="fixed inset-0 bg-black opacity-50"
-        onClick={onClose}
+        onClick={() => { if (!loading) onClose(); }}
       ></div>
 
       {/* Modal */}
@@ -33,12 +33,14 @@ const DeleteConfirmation = ({ isOpen, onClose, onConfirm, title, message, confir
               variant="secondary"
               scheme="danger"
               onClick={onClose}
+              disabled={loading}
             >
               Cancel
             </Button>
             <Button
               variant="danger"
               onClick={onConfirm}
+              loading={loading}
             >
               {confirmLabel}
             </Button>

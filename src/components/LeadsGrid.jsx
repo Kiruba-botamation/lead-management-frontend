@@ -1163,6 +1163,8 @@ const LeadsGrid = () => {
     const [isSaving,          setIsSaving]          = useState(false);
     const [deleteLeadId,      setDeleteLeadId]      = useState(null);
     const [isDeleteOpen,      setIsDeleteOpen]       = useState(false);
+    const [deleteLeadLoading, setDeleteLeadLoading]  = useState(false);
+    const deleteLeadLoadingRef = useRef(false);
 
     // ── Activity panel (Notes / Reminders) ───────────────────────────────────
     const [activityLead,    setActivityLead]    = useState(null);
@@ -1722,16 +1724,22 @@ const LeadsGrid = () => {
     // ── Delete lead ───────────────────────────────────────────────────────────
     const handleDeleteOpen    = (id)  => { setDeleteLeadId(id); setIsDeleteOpen(true); };
     const handleDeleteConfirm = async () => {
-        if (!deleteLeadId) return;
+        if (!deleteLeadId || deleteLeadLoadingRef.current) return;
+        deleteLeadLoadingRef.current = true;
+        setDeleteLeadLoading(true);
         try {
             await api.delete(`/api/ui/leads/${deleteLeadId}`, { params: { acctId } });
             showSuccess('Lead deleted successfully.');
             setIsDeleteOpen(false);
             setDeleteLeadId(null);
-            fetchLeads();
+            await fetchCollections();
+            await fetchLeads();
             setLeadsVersion(v => v + 1);
         } catch (err) {
             showError(err.response?.data?.message || 'Failed to delete lead.');
+        } finally {
+            deleteLeadLoadingRef.current = false;
+            setDeleteLeadLoading(false);
         }
     };
 
@@ -2516,10 +2524,11 @@ const LeadsGrid = () => {
             {/* Delete lead confirmation */}
             <DeleteConfirmation
                 isOpen={isDeleteOpen}
-                onClose={() => setIsDeleteOpen(false)}
+                onClose={() => { if (!deleteLeadLoading) setIsDeleteOpen(false); }}
                 onConfirm={handleDeleteConfirm}
                 title="Delete Lead"
                 message="Are you sure you want to delete this lead? This action cannot be undone."
+                loading={deleteLeadLoading}
             />
 
             {/* Delete collection confirmation */}
